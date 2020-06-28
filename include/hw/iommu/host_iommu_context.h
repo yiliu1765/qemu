@@ -70,6 +70,12 @@ typedef struct HostIOMMUContextClass {
      */
     int (*flush_stage1_cache)(HostIOMMUContext *iommu_ctx,
                               struct iommu_cache_invalidate_info *cache);
+    /*
+     * Response page requests from device. Response message
+     * is specified in @resp.
+     */
+    int (*page_response)(HostIOMMUContext *iommu_ctx,
+                         struct iommu_page_response *resp);
 } HostIOMMUContextClass;
 
 /*
@@ -79,6 +85,7 @@ struct HostIOMMUContext {
     Object parent_obj;
 #define HOST_IOMMU_PASID_REQUEST (1ULL << 0)
 #define HOST_IOMMU_NESTING       (1ULL << 1)
+#define HOST_IOMMU_PAGE_RESP     (1ULL << 2)
     uint64_t flags;
     struct iommu_nesting_info *info;
     bool initialized;
@@ -93,6 +100,8 @@ int host_iommu_ctx_unbind_stage1_pgtbl(HostIOMMUContext *iommu_ctx,
                                  struct iommu_gpasid_bind_data *unbind);
 int host_iommu_ctx_flush_stage1_cache(HostIOMMUContext *iommu_ctx,
                                struct iommu_cache_invalidate_info *cache);
+int host_iommu_ctx_page_response(HostIOMMUContext *iommu_ctx,
+                                 struct iommu_page_response *resp);
 
 void host_iommu_ctx_init(void *_iommu_ctx, size_t instance_size,
                          const char *mrtypename,
