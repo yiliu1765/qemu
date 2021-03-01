@@ -68,6 +68,8 @@ typedef struct VTDIOMMUFDDevice VTDIOMMUFDDevice;
 typedef struct VTDPASIDStoreEntry VTDPASIDStoreEntry;
 typedef struct VTDPASIDCacheEntry VTDPASIDCacheEntry;
 typedef struct VTDPASIDAddressSpace VTDPASIDAddressSpace;
+typedef struct VTDHwpt VTDHwpt;
+typedef struct VTDS2Hwpt VTDS2Hwpt;
 
 /* Context-Entry */
 struct VTDContextEntry {
@@ -105,14 +107,31 @@ struct pasid_key {
     uint16_t sid;
 };
 
+struct VTDHwpt {
+    uint32_t hwpt_id;
+    int iommufd;
+    int eventfd;
+    EventNotifier notifier;
+    int fault_fd;
+    uint32_t fault_tail_index;
+};
+
+struct VTDS2Hwpt {
+    uint32_t hwpt_id;
+    int iommufd;
+    uint32_t users;
+};
+
 struct VTDPASIDCacheEntry {
     struct VTDPASIDEntry pasid_entry;
+    bool cache_filled;
 };
 
 struct VTDPASIDAddressSpace {
     VTDBus *vtd_bus;
     uint8_t devfn;
     uint32_t pasid;
+    VTDHwpt hwpt;
     IntelIOMMUState *iommu_state;
     VTDContextCacheEntry context_cache_entry;
     QLIST_ENTRY(VTDPASIDAddressSpace) next;
@@ -322,6 +341,7 @@ struct IntelIOMMUState {
     uint64_t vcrsp;                 /* Current value of VCMD RSP REG */
     /* /dev/iommu interface */
     IOMMUFDBackend *iommufd;
+    VTDS2Hwpt *s2_hwpt;
     bool non_identical_pasid;       /* False: guest PASID equals to host PASID */
     uint32_t next_idx;
     VTDPASIDStoreEntry vtd_pasid[1024][1024];
