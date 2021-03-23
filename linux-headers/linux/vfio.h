@@ -988,6 +988,22 @@ struct vfio_device_feature {
  */
 #define VFIO_DEVICE_FEATURE_PCI_VF_TOKEN	(0)
 
+/**
+ * VFIO_DEVICE_SET_SVA - _IOW(VFIO_TYPE, VFIO_BASE + 18, __s32)
+ *
+ * Return: 0 on success, -errno on failure.
+ * Availability: When device is attached to a nesting type container
+ */
+#define VFIO_DEVICE_SET_SVA	_IO(VFIO_TYPE, VFIO_BASE + 18)
+
+/**
+ * VFIO_DEVICE_UNSET_SVA - _IO(VFIO_TYPE, VFIO_BASE + 19)
+ *
+ * Return: 0 on success, -errno on failure.
+ * Availability: When device is attached to a nesting type container
+ */
+#define VFIO_DEVICE_UNSET_SVA	_IO(VFIO_TYPE, VFIO_BASE + 19)
+
 /* -------- API for Type1 VFIO IOMMU -------- */
 
 /**
