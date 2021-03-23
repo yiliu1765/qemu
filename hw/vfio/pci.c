@@ -2616,6 +2616,10 @@ static void vfio_put_device(VFIOPCIDevice *vdev)
     g_free(vdev->vbasedev.name);
     g_free(vdev->msix);
 
+    if (vdev->vbasedev.iommu_ctx.initialized) {
+        pci_device_unset_iommu_context(&vdev->pdev);
+    }
+
     vfio_put_base_device(&vdev->vbasedev);
 }
 
@@ -2858,8 +2862,16 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         goto error;
     }
 
-    ret = vfio_get_device(group, vdev->vbasedev.name, &vdev->vbasedev, errp);
+    ret = vfio_get_device(group, vdev->vbasedev.name, &vdev->vbasedev, want_nested, errp);
     if (ret) {
+        vfio_put_group(group);
+        goto error;
+    }
+
+    if (vdev->vbasedev.iommu_ctx.initialized &&
+        pci_device_set_iommu_context(pdev, &vdev->vbasedev.iommu_ctx)) {
+        error_setg(errp, "device attachment is denied by vIOMMU, "
+                   "please check host IOMMU nesting capability");
         vfio_put_group(group);
         goto error;
     }

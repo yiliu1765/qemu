@@ -30,6 +30,7 @@
 #include <linux/vfio.h>
 #endif
 #include "sysemu/sysemu.h"
+#include "hw/iommu/host_iommu_context.h"
 
 #define VFIO_MSG_PREFIX "vfio %s: "
 
@@ -129,6 +130,7 @@ typedef struct VFIODevice {
     unsigned int num_regions;
     unsigned int flags;
     VFIOMigration *migration;
+    HostIOMMUContext iommu_ctx;
     Error *migration_blocker;
     OnOffAuto pre_copy_dirty_page_tracking;
 } VFIODevice;
@@ -200,7 +202,7 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as,
                           bool want_nested, Error **errp);
 void vfio_put_group(VFIOGroup *group);
 int vfio_get_device(VFIOGroup *group, const char *name,
-                    VFIODevice *vbasedev, Error **errp);
+                    VFIODevice *vbasedev, bool want_nested, Error **errp);
 
 extern const MemoryRegionOps vfio_region_ops;
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;

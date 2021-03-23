@@ -2027,11 +2027,40 @@ void vfio_put_group(VFIOGroup *group)
     }
 }
 
+static int vfio_device_associate_sva(int device_fd, Error **errp)
+{
+    int fd;
+
+    fd = qemu_open_old("/dev/usva", O_RDWR);
+    if (fd < 0) {
+        error_setg_errno(errp, errno, "failed to open /dev/usva");
+        return -errno;
+    }
+
+    if (ioctl(device_fd, VFIO_DEVICE_SET_SVA, &fd)) {
+        error_setg_errno(errp, errno, "failed to associate usva fd");
+        return -errno;
+    }
+
+    return fd;
+}
+
+static int vfio_device_unassociate_sva(int device_fd, int usva_fd)
+{
+    if (ioctl(device_fd, VFIO_DEVICE_UNSET_SVA, &usva_fd)) {
+        error_report("failed to unassociate usva fd %d", errno);
+        return -errno;
+    }
+
+    close(usva_fd);
+    return 0;
+}
+
 int vfio_get_device(VFIOGroup *group, const char *name,
-                    VFIODevice *vbasedev, Error **errp)
+                    VFIODevice *vbasedev, bool want_nested, Error **errp)
 {
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
-    int ret, fd;
+    int ret, fd, usva_fd = -1;
 
     fd = ioctl(group->fd, VFIO_GROUP_GET_DEVICE_FD, name);
     if (fd < 0) {
@@ -2050,6 +2079,27 @@ int vfio_get_device(VFIOGroup *group, const char *name,
         return ret;
     }
 
+    if (want_nested) {
+        struct iommu_sva_info info;
+
+        usva_fd = vfio_device_associate_sva(fd, errp);
+        if (usva_fd < 0) {
+            close(fd);
+            return usva_fd;
+        }
+        ret = ioctl(usva_fd, IOMMU_USVA_GET_INFO, &info);
+        if (ret) {
+            vfio_device_unassociate_sva(fd, usva_fd);
+            close(fd);
+            return ret;
+        }
+        host_iommu_ctx_init(&vbasedev->iommu_ctx,
+                            sizeof(vbasedev->iommu_ctx),
+                            TYPE_HOST_IOMMU_CONTEXT,
+                            usva_fd,
+                            &info);
+    }
+
     /*
      * Set discarding of RAM as not broken for this group if the driver knows
      * the device operates compatibly with discarding.  Setting must be
@@ -2061,6 +2111,9 @@ int vfio_get_device(VFIOGroup *group, const char *name,
         if (!QLIST_EMPTY(&group->device_list)) {
             error_setg(errp, "Inconsistent setting of support for discarding "
                        "RAM (e.g., balloon) within group");
+            if (usva_fd > 0) {
+                vfio_device_unassociate_sva(fd, usva_fd);
+            }
             close(fd);
             return -1;
         }
@@ -2094,6 +2147,9 @@ void vfio_put_base_device(VFIODevice *vbasedev)
     QLIST_REMOVE(vbasedev, next);
     vbasedev->group = NULL;
     trace_vfio_put_base_device(vbasedev->fd);
+    if (vbasedev->iommu_ctx.initialized) {
+        vfio_device_unassociate_sva(vbasedev->fd, vbasedev->iommu_ctx.fd);
+    }
     close(vbasedev->fd);
 }
 
