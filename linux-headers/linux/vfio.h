@@ -190,6 +190,71 @@ struct vfio_group_status {
 
 /* --------------- IOCTLs for DEVICE file descriptors --------------- */
 
+/*
+ * VFIO_DEVICE_BIND_IOMMUFD - _IOR(VFIO_TYPE, VFIO_BASE + 19,
+ *				struct vfio_device_iommu_bind_data)
+ *
+ * Bind a vfio_device to the specified IOMMU fd
+ *
+ * The user should provide a device cookie when calling this ioctl. The
+ * cookie is later used in IOMMU fd for capability query, iotlb invalidation
+ * and I/O fault handling.
+ *
+ * User is not allowed to access the device before the binding operation
+ * is completed.
+ *
+ * Unbind is automatically conducted when device fd is closed.
+ *
+ * Input parameters:
+ *	- iommu_fd;
+ *	- dev_cookie;
+ *
+ * Return: 0 on success, -errno on failure.
+ */
+struct vfio_device_iommu_bind_data {
+	__u32	argsz;
+	__u32	flags;
+	__s32	iommu_fd;
+	__u64	dev_cookie;
+};
+
+#define VFIO_DEVICE_BIND_IOMMUFD	_IO(VFIO_TYPE, VFIO_BASE + 19)
+
+/*
+ * VFIO_DEVICE_ATTACH_IOASID - _IOW(VFIO_TYPE, VFIO_BASE + 21,
+ *				struct vfio_device_attach_ioasid)
+ *
+ * Attach a vfio device to the specified IOASID
+ *
+ * Multiple vfio devices can be attached to the same IOASID, and vice
+ * versa.
+ *
+ * User may optionally provide a "virtual PASID" to mark an I/O page
+ * table on this vfio device, if PASID_DELEGATED is not set in device info.
+ * Whether the virtual PASID is physically used or converted to another
+ * kernel-allocated PASID is a policy in the kernel.
+ *
+ * Because one device is allowed to bind to multiple IOMMU fd's, the user
+ * should provide both iommu_fd and ioasid for this attach operation.
+ *
+ * Input parameter:
+ *	- iommu_fd;
+ *	- ioasid;
+ *	- flag;
+ *	- vpasid (if specified);
+ *
+ * Return: 0 on success, -errno on failure.
+ */
+struct vfio_device_attach_ioasid {
+	__u32	argsz;
+	__u32	flags;
+	__s32	iommu_fd;
+	__s32	ioasid;
+};
+
+#define VFIO_DEVICE_ATTACH_IOASID	_IO(VFIO_TYPE, VFIO_BASE + 20)
+#define VFIO_DEVICE_DETACH_IOASID	_IO(VFIO_TYPE, VFIO_BASE + 21)
+
 /**
  * VFIO_DEVICE_GET_INFO - _IOR(VFIO_TYPE, VFIO_BASE + 7,
  *						struct vfio_device_info)
