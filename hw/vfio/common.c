@@ -2053,6 +2053,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     QLIST_INIT(&container->vrdl_list);
 
     ret = vfio_init_container(container, group->fd, errp);
+    printf("%s ret: %d\n", __func__, ret);
     if (ret) {
         goto free_container_exit;
     }

@@ -21,6 +21,7 @@
 #include "qemu/osdep.h"
 #include <linux/vfio.h>
 #include <sys/ioctl.h>
+#include <linux/iommu.h>
 
 #include "hw/hw.h"
 #include "hw/pci/msi.h"
@@ -42,6 +43,7 @@
 #include "qapi/error.h"
 #include "migration/blocker.h"
 #include "migration/qemu-file.h"
+#include "hw/iommu/iommu.h"
 
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 
@@ -2789,7 +2791,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     Error *err = NULL;
     ssize_t len;
     struct stat st;
-    int groupid;
+    int groupid, iommufd;
     int i, ret;
     bool is_mdev;
 
@@ -2837,6 +2839,111 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     }
 
     trace_vfio_realize(vdev->vbasedev.name, groupid);
+
+    iommufd = iommufd_open();
+    if (iommufd < 0) {
+        printf("error\n");
+    } else {
+        int ioasid, rt;
+	int devicefd;
+	char *device_path;
+	struct vfio_device_iommu_bind_data bind_data;
+
+        device_path = g_strdup_printf("/dev/vfio/devices/%04x:%02x:%02x.%01x",
+                            vdev->host.domain, vdev->host.bus,
+                            vdev->host.slot, vdev->host.function);
+	printf("%s\n", device_path);
+
+	devicefd = qemu_open_old(device_path, O_RDWR);
+	if (devicefd < 0) {
+		printf("error devicefd: %d\n", devicefd);
+	} else {
+		bind_data.argsz = sizeof(bind_data);
+		bind_data.flags = 0;
+		bind_data.iommu_fd = iommufd;
+		bind_data.dev_cookie = (uint64_t) vdev;
+
+		rt = ioctl(devicefd, VFIO_DEVICE_BIND_IOMMUFD, &bind_data);
+		if (rt) {
+			printf("error bind failed, rt: %d\n", rt);
+		} else {
+			ioasid = iommufd_alloc_ioasd(iommufd);
+			printf("ioasid: %d\n", ioasid);
+			if (ioasid >= 0) {
+				struct vfio_device_attach_ioasid attach_data;
+
+				attach_data.argsz = sizeof(attach_data);
+				attach_data.flags = 0;
+				attach_data.iommu_fd = iommufd;
+				attach_data.ioasid = ioasid;
+
+				printf("attach ioasid: %d - 1\n", ioasid);
+				rt = ioctl(devicefd, VFIO_DEVICE_ATTACH_IOASID, &attach_data);
+				printf("attach ioasid: %d - 2, ret: %d\n", ioasid, ret);
+				if (rt) {
+					printf("error attach ioasid failed, rt: %d\n", rt);
+				} else {
+					struct iommu_ioasid_dma_op *op;
+					struct vfio_iommu_type1_dma_map *map;
+
+					/* Test MAP */
+					op = g_malloc0(sizeof(*op) + sizeof(*map));
+					op->argsz = sizeof(*op) + sizeof(*map);
+					op->flags = 0;
+					op->ioasid = ioasid;
+
+					map = (struct vfio_iommu_type1_dma_map *)&op->data;
+					map->argsz = sizeof(*map);
+					/* Allocate some space and setup a DMA mapping */
+					map->vaddr = (__u64)(uintptr_t)mmap(0, 1024 * 1024, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+					printf("map->vaddr: %llx\n", (unsigned long long)map->vaddr);
+					map->size = 1024 * 1024;
+					map->iova = 0; /* 1MB starting at 0x0 from device view */
+					map->flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
+
+					printf("map\n");
+					rt = ioctl(iommufd, IOMMU_MAP_DMA, op);
+					if (rt) {
+						printf("map failed %m\n");
+					} else {
+						struct iommu_ioasid_dma_op *op2;
+						struct vfio_iommu_type1_dma_unmap *unmap;
+
+						op2 = g_malloc0(sizeof(*op2) + sizeof(*unmap));
+						op2->argsz = sizeof(*op2) + sizeof(*unmap);
+						op2->flags = 0;
+						op2->ioasid = ioasid;
+
+						unmap = (struct vfio_iommu_type1_dma_unmap *)&op2->data;
+						unmap->argsz = sizeof(*unmap);
+						unmap->size = 1024 * 1024;
+						unmap->iova = 0; /* 1MB starting at 0x0 from device view */
+						unmap->flags = 0;
+						printf("unmap\n");
+						rt = ioctl(iommufd, IOMMU_UNMAP_DMA, op2);
+						if (rt) {
+							printf("unmap failed %m\n");
+						}
+						g_free(op2);
+					}
+					g_free(op);
+
+					printf("detach ioasid: %d - 1\n", ioasid);
+					rt = ioctl(devicefd, VFIO_DEVICE_DETACH_IOASID, &attach_data);
+					printf("detach ioasid: %d - 2, ret: %d\n", ioasid, ret);
+				}
+				printf("try to free ioasid: %d - 1\n", ioasid);
+				iommufd_free_ioasd(iommufd, ioasid);
+				printf("try to free ioasid: %d - 2\n", ioasid);
+			}
+		}
+		printf(" close devicefd\n");
+		close(devicefd);
+	}
+	printf(" close iommufd\n");
+	iommufd_close(iommufd);
+    }
 
     group = vfio_get_group(groupid, pci_device_iommu_address_space(pdev), errp);
     if (!group) {
