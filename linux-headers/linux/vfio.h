@@ -194,10 +194,10 @@ struct vfio_group_status {
  * VFIO_DEVICE_BIND_IOMMUFD - _IOR(VFIO_TYPE, VFIO_BASE + 19,
  *				struct vfio_device_iommu_bind_data)
  *
- * Bind a vfio_device to the specified IOMMU fd
+ * Bind a vfio_device to the specified iommufd
  *
  * The user should provide a device cookie when calling this ioctl. The
- * cookie is later used in IOMMU fd for capability query, iotlb invalidation
+ * cookie is later used in iommufd for capability query, iotlb invalidation
  * and I/O fault handling.
  *
  * User is not allowed to access the device before the binding operation
@@ -226,22 +226,13 @@ struct vfio_device_iommu_bind_data {
  *
  * Attach a vfio device to the specified IOASID
  *
- * Multiple vfio devices can be attached to the same IOASID, and vice
- * versa.
+ * Multiple vfio devices can be attached to the same IOASID. One device can
+ * be attached to only one ioasid in this version.
  *
- * User may optionally provide a "virtual PASID" to mark an I/O page
- * table on this vfio device, if PASID_DELEGATED is not set in device info.
- * Whether the virtual PASID is physically used or converted to another
- * kernel-allocated PASID is a policy in the kernel.
- *
- * Because one device is allowed to bind to multiple IOMMU fd's, the user
- * should provide both iommu_fd and ioasid for this attach operation.
- *
- * Input parameter:
- *	- iommu_fd;
- *	- ioasid;
- *	- flag;
- *	- vpasid (if specified);
+ * @argsz:	user filled size of this data.
+ * @flags:	reserved for future extension.
+ * @iommu_fd:	iommufd where the ioasid comes from.
+ * @ioasid:	target I/O address space.
  *
  * Return: 0 on success, -errno on failure.
  */

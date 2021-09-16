@@ -48,19 +48,28 @@
  * Check IOMMU capabilities and format information on a bound device.
  *
  * The device is identified by device cookie (registered when binding
- * this device). Userspace will rely on it to managge I/O address space
- * for assigned devices.
- *
- * Fills in provided struct iommu_device_info. Caller sets argsz.
+ * this device).
  *
  * @argsz:	   user filled size of this data.
- * @flags:	   flags to tell userspace 1-bit setting capabilities and
- *		   field availability.
+ * @flags:	   tells userspace which capability info is available
  * @dev_cookie:	   user assinged cookie.
  * @model:	   vendor types (e.g. VT-d, SMMU, AMD, SPAPR etc.)
  * @addr_width:    the address width of supported I/O addresses.
- * @pgsize_bitmap: Bitmap of supported page sizes.
- * @cap_offset:    Offset within info struct of first cap.
+ * @pgsize_bitmap: Bitmap of supported page sizes. 1-setting of the
+ *		   bit in pgsize_bitmap[63:12] indicates a supported
+ *		   page size. Details as below table:
+ *
+ *		   +===============+============+
+ *		   |  Bit[index]   |  Page Size |
+ *		   +---------------+------------+
+ *		   |  12           |  4 KB      |
+ *		   +---------------+------------+
+ *		   |  13           |  8 KB      |
+ *		   +---------------+------------+
+ *		   |  14           |  16 KB     |
+ *		   +---------------+------------+
+ *		   ...
+ * @cap_offset:	   Offset within info struct of first cap
  *
  * Sample capability info:
  *	- VFIO type1 map: supported page sizes, address width, permitted IOVA ranges, etc.;
@@ -70,15 +79,15 @@
  *	- coherency: whether IOMMU can enforce snoop for this device;
  *	- ...
  *
- * Availability: after device is bound to IOMMU FD
+ * Availability: after device is bound to iommufd
  */
 struct iommu_device_info {
 	__u32	argsz;
 	__u32	flags;
-#define IOMMU_DEVICE_INFO_ENFORCE_SNOOP	(1 << 0) /* IOMMU enforced snoop */
-#define IOMMU_DEVICE_INFO_ADDR_WIDTH		(1 << 1) /* addr_wdith field valid */
-#define IOMMU_DEVICE_INFO_PGSIZES		(1 << 2) /* supported page sizes info */
-#define IOMMU_DEVICE_INFO_CAPS			(1 << 3) /* info supports cap chain */
+#define IOMMU_DEVICE_INFO_ENFORCE_SNOOP (1 << 0) /* IOMMU enforced snoop */
+#define IOMMU_DEVICE_INFO_ADDR_WIDTH	 (1 << 1) /* addr_wdith field valid */
+#define IOMMU_DEVICE_INFO_PGSIZES	 (1 << 2) /* supported page sizes */
+#define IOMMU_DEVICE_INFO_CAPS		 (1 << 3) /* info supports cap chain */
 	__u64	dev_cookie;
 	__u32   model;
 	__u32	addr_width;
@@ -107,10 +116,12 @@ struct iommu_device_info {
  * device side.
  *
  * @argsz:	    user filled size of this data.
- * @flags:	    currently only IOMMU_IOASID_ATTR_ENFORCE_SNOOP is supported
- * @type:	    I/O address space page table type, kernel managed or else
- * @addr_width:    input address width
- * @pgsize_bitmap: Bitmap of supported page sizes
+ * @flags:	    Only IOMMU_IOASID_ATTR_ENFORCE_SNOOP is supported, and
+ *		    IOMMU_IOASID_ATTR_ENFORCE_SNOOP should be set for this
+ *		    version.
+ * @type:	    I/O address space page table type, only kernel managed
+ *		    type is supported.
+ * @addr_width:    address width of the I/O address space.
  *
  * Return: allocated ioasid on success, -errno on failure.
  */
@@ -121,7 +132,6 @@ struct iommu_ioasid_alloc {
 	__u32	type;
 #define IOMMU_IOASID_TYPE_KERNEL	1
 	__u32	addr_width;
-	__u64   pgsize_bitmap;
 };
 
 #define IOMMU_IOASID_ALLOC		_IO(IOMMU_TYPE, IOMMU_BASE + 2)
@@ -151,8 +161,9 @@ struct iommu_ioasid_alloc {
  * @flags:	currently bit 0 is used to specify map or unmap.
  * @ioasid:	the handle of target I/O address space.
  * @data:	the operation payload, refer to vfio_iommu_type1_dma_{un}map
- * FIXME: should have its own map/unmap structure once the code sharing
- *	  between VFIO and /dev/iommu is finalized.
+ * FIXME:
+ *	userspace needs to include uapi/vfio.h as well as interface reuses
+ *	the map/unmap logic from vfio iommu type1.
  *
  * Return: 0 on success, -errno on failure.
  */
