@@ -2782,6 +2782,90 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
     vdev->req_enabled = false;
 }
 
+static int iommufd_device_get_info(int iommufd, int devicefd,
+                                   uint64_t cookie,
+                                   struct iommu_device_info **info)
+{
+    size_t argsz = sizeof(struct iommu_device_info);
+
+    *info = g_new0(struct iommu_device_info, 1);
+again:
+    (*info)->argsz = argsz;
+    (*info)->dev_cookie = cookie;
+
+    if (ioctl(iommufd, IOMMU_DEVICE_GET_INFO, *info)) {
+        printf("error to get info %m\n");
+        g_free(*info);
+        *info = NULL;
+        return -errno;
+    }
+
+    if (((*info)->argsz > argsz)) {
+        argsz = (*info)->argsz;
+        *info = g_realloc(*info, argsz);
+        goto again;
+    }
+
+    return 0;
+}
+
+static struct vfio_info_cap_header *
+get_iommu_info_cap(struct iommu_device_info *info, uint16_t id)
+{
+    struct vfio_info_cap_header *hdr;
+    void *ptr = info;
+
+    if (!(info->flags & IOMMU_DEVICE_INFO_CAPS)) {
+        return NULL;
+    }
+
+    for (hdr = ptr + info->cap_offset; hdr != ptr; hdr = ptr + hdr->next) {
+	    printf("%s hdr->id: %u\n", __func__, hdr->id);
+        if (hdr->id == id) {
+            return hdr;
+        }
+    }
+
+    return NULL;
+}
+
+static void get_device_iova_ranges(struct iommu_device_info *info)
+{
+    struct vfio_info_cap_header *hdr;
+    struct vfio_iommu_type1_info_cap_iova_range *cap_iova_range;
+    int i;
+
+    hdr = get_iommu_info_cap(info, VFIO_IOMMU_TYPE1_INFO_CAP_IOVA_RANGE);
+    if (!hdr) {
+	    return;
+    }
+
+    cap_iova_range = container_of(hdr, struct vfio_iommu_type1_info_cap_iova_range,
+                                  header);
+
+    for (i = 0; i < cap_iova_range->nr_iovas; i++) {
+        printf("cap_iova_range->iova_ranges[%d].start: 0x%llx, end: 0x%llx\n", i, cap_iova_range->iova_ranges[i].start, cap_iova_range->iova_ranges[i].end);
+    }
+}
+
+static int check_device_iommu_info(int iommufd, int devicefd, uint64_t cookie)
+{
+    struct iommu_device_info *info;
+
+    if (!iommufd_device_get_info(iommufd, devicefd, cookie, &info)) {
+        if (info->flags & IOMMU_DEVICE_INFO_ENFORCE_SNOOP)
+		printf("Snoop!\n");
+        if (info->flags & IOMMU_DEVICE_INFO_ADDR_WIDTH)
+		printf("addr_width: %x\n", info->addr_width);
+        if (info->flags & IOMMU_DEVICE_INFO_PGSIZES)
+		printf("pgsize_bitmap: 0x%llx\n", info->pgsize_bitmap);
+        get_device_iova_ranges(info);
+	g_free(info);
+	return 0;
+    }
+    return -EINVAL;
+}
+
 #define DEV_IOMMU_TEST_KEEP_ATTACH (1 << 0)
 static int test_device_interface(int iommufd, char *device_path, uint64_t cookie, uint32_t flags, int asid)
 {
@@ -2811,6 +2895,7 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 		return rt;
 	}
 
+	check_device_iommu_info(iommufd, devicefd, cookie);
 	if (flags & DEV_IOMMU_TEST_KEEP_ATTACH) {
 		ioasid = asid;
 	} else {
