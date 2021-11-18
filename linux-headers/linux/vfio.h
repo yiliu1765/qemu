@@ -206,45 +206,49 @@ struct vfio_group_status {
  * Unbind is automatically conducted when device fd is closed.
  *
  * Input parameters:
- *	- iommu_fd;
+ *	- iommufd;
  *	- dev_cookie;
+ *
+ * Output parameters:
+ *	- devid;
  *
  * Return: 0 on success, -errno on failure.
  */
 struct vfio_device_iommu_bind_data {
-	__u32	argsz;
-	__u32	flags;
-	__s32	iommu_fd;
-	__u64	dev_cookie;
+	__u32		argsz;
+	__u32		flags;
+	__aligned_u64	dev_cookie;
+	__s32		iommufd;
+	__u32		devid;
 };
 
 #define VFIO_DEVICE_BIND_IOMMUFD	_IO(VFIO_TYPE, VFIO_BASE + 19)
 
 /*
- * VFIO_DEVICE_ATTACH_IOASID - _IOW(VFIO_TYPE, VFIO_BASE + 21,
- *				struct vfio_device_attach_ioasid)
+ * VFIO_DEVICE_ATTACH_IOAS - _IOW(VFIO_TYPE, VFIO_BASE + 21,
+ *				struct vfio_device_attach_ioas)
  *
  * Attach a vfio device to the specified IOASID
  *
  * Multiple vfio devices can be attached to the same IOASID. One device can
- * be attached to only one ioasid in this version.
+ * be attached to only one ioas at this point.
  *
  * @argsz:	user filled size of this data.
  * @flags:	reserved for future extension.
- * @iommu_fd:	iommufd where the ioasid comes from.
- * @ioasid:	target I/O address space.
+ * @iommufd:	iommufd where the ioas comes from.
+ * @ioas:	target I/O address space.
  *
  * Return: 0 on success, -errno on failure.
  */
-struct vfio_device_attach_ioasid {
+struct vfio_device_attach_ioas {
 	__u32	argsz;
 	__u32	flags;
-	__s32	iommu_fd;
-	__s32	ioasid;
+	__s32	iommufd;
+	__u32	ioas;
 };
 
-#define VFIO_DEVICE_ATTACH_IOASID	_IO(VFIO_TYPE, VFIO_BASE + 20)
-#define VFIO_DEVICE_DETACH_IOASID	_IO(VFIO_TYPE, VFIO_BASE + 21)
+#define VFIO_DEVICE_ATTACH_IOAS	_IO(VFIO_TYPE, VFIO_BASE + 20)
+#define VFIO_DEVICE_DETACH_IOAS	_IO(VFIO_TYPE, VFIO_BASE + 21)
 
 /**
  * VFIO_DEVICE_GET_INFO - _IOR(VFIO_TYPE, VFIO_BASE + 7,

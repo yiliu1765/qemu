@@ -44,36 +44,37 @@ void iommufd_close(int fd)
     close(fd);
 }
 
-int iommufd_alloc_ioasd(int fd)
+int iommufd_alloc_ioasd(int fd, uint32_t *ioasid)
 {
-    struct iommu_ioasid_alloc alloc_data;
-    int ioasid;
+    struct iommu_ioas_alloc alloc_data;
+    int ret;
 
     if (fd < 0) {
         return -EINVAL;
     }
 
     alloc_data.argsz = sizeof(alloc_data);
-    alloc_data.flags = IOMMU_IOASID_ATTR_ENFORCE_SNOOP;
-    alloc_data.type = IOMMU_IOASID_TYPE_KERNEL;
+    alloc_data.flags = IOMMU_IOAS_ENFORCE_SNOOP;
+    alloc_data.type = IOMMU_IOAS_TYPE_KERNEL_TYPE1V2;
     alloc_data.addr_width = 48;
 
-    ioasid = ioctl(fd, IOMMU_IOASID_ALLOC, &alloc_data);
-    if (ioasid < 0) {
+    ret = ioctl(fd, IOMMU_IOAS_ALLOC, &alloc_data);
+    if (ret < 0) {
         error_report("Failed to allocate ioasid  %m\n");
     }
 
-    return ioasid;
+    *ioasid = alloc_data.ioas_id;
+    return ret;
 }
 
-void iommufd_free_ioasd(int fd, int ioasid)
+void iommufd_free_ioasd(int fd, uint32_t ioasid)
 {
 
-    if (fd < 0 || ioasid < 0) {
+    if (fd < 0) {
         return;
     }
 
-    if (ioctl(fd, IOMMU_IOASID_FREE, &ioasid)) {
-        error_report("Failed to free ioasid: %d  %m\n", ioasid);
+    if (ioctl(fd, IOMMU_IOAS_FREE, &ioasid)) {
+        error_report("Failed to free ioasid: %u  %m\n", ioasid);
     }
 }

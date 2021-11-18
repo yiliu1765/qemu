@@ -29,7 +29,7 @@
  *	- EXT_DMA_NO_SNOOP for no-snoop DMA support;
  *	- EXT_MAP_NEWTYPE for an enhanced map semantics;
  *	- EXT_MULTIDEV_GROUP for 1:N iommu group;
- *	- EXT_IOASID_NESTING for what the name stands;
+ *	- EXT_IOAS_NESTING for what the name stands;
  *	- EXT_USER_PAGE_TABLE for user managed page table;
  *	- EXT_USER_PASID_TABLE for user managed PASID table;
  *	- EXT_DIRTY_TRACKING for tracking pages dirtied by DMA;
@@ -47,14 +47,13 @@
  *
  * Check IOMMU capabilities and format information on a bound device.
  *
- * The device is identified by device cookie (registered when binding
+ * The device is identified by devid (returned by kernel when binding
  * this device).
  *
  * @argsz:	   user filled size of this data.
  * @flags:	   tells userspace which capability info is available
- * @dev_cookie:	   user assinged cookie.
- * @model:	   vendor types (e.g. VT-d, SMMU, AMD, SPAPR etc.)
- * @addr_width:    the address width of supported I/O addresses.
+ * @devid:	   device id
+ * @addr_width:    the address width of supported I/O address spaces.
  * @pgsize_bitmap: Bitmap of supported page sizes. 1-setting of the
  *		   bit in pgsize_bitmap[63:12] indicates a supported
  *		   page size. Details as below table:
@@ -71,80 +70,78 @@
  *		   ...
  * @cap_offset:	   Offset within info struct of first cap
  *
- * Sample capability info:
- *	- VFIO type1 map: supported page sizes, address width, permitted IOVA ranges, etc.;
- *	- IOASID nesting: hardware nesting vs. software nesting;
- *	- User-managed page table: vendor specific formats;
- *	- User-managed pasid table: vendor specific formats;
- *	- coherency: whether IOMMU can enforce snoop for this device;
- *	- ...
- *
  * Availability: after device is bound to iommufd
  */
 struct iommu_device_info {
-	__u32	argsz;
-	__u32	flags;
-#define IOMMU_DEVICE_INFO_ENFORCE_SNOOP (1 << 0) /* IOMMU enforced snoop */
-#define IOMMU_DEVICE_INFO_ADDR_WIDTH	 (1 << 1) /* addr_wdith field valid */
-#define IOMMU_DEVICE_INFO_PGSIZES	 (1 << 2) /* supported page sizes */
-#define IOMMU_DEVICE_INFO_CAPS		 (1 << 3) /* info supports cap chain */
-	__u64	dev_cookie;
-	__u32   model;
-	__u32	addr_width;
-	__u64   pgsize_bitmap;
-	__u32   cap_offset;
+	__u32		argsz;
+	__u32		flags;
+#define IOMMU_DEVICE_INFO_ENFORCE_SNOOP	(1 << 0) /* IOMMU enforced snoop */
+#define IOMMU_DEVICE_INFO_ADDR_WIDTH	(1 << 1) /* addr_wdith field valid */
+#define IOMMU_DEVICE_INFO_PGSIZES	(1 << 2) /* supported page sizes */
+#define IOMMU_DEVICE_INFO_CAPS		(1 << 3) /* info supports cap chain */
+	__u32		devid;
+	__u32		addr_width;
+	__aligned_u64   pgsize_bitmap;
+	__u32		cap_offset;
 };
 
 #define IOMMU_DEVICE_GET_INFO	_IO(IOMMU_TYPE, IOMMU_BASE + 1)
 
 /*
- * IOMMU_IOASID_ALLOC	- _IOWR(IOMMU_TYPE, IOMMU_BASE + 2,
- *				struct iommu_ioasid_alloc)
+ * IOMMU_IOAS_ALLOC	- _IOWR(IOMMU_TYPE, IOMMU_BASE + 2,
+ *				struct iommu_ioas_alloc)
  *
- * Allocate an IOASID.
+ * Allocate an IOAS.
  *
- * IOASID is the FD-local software handle representing an I/O address
- * space. Each IOASID is associated with a single I/O page table. User
- * must call this ioctl to get an IOASID for every I/O address space
+ * IOAS is the FD-local software handle representing an I/O address
+ * space. Each IOAS is associated with a single I/O page table. User
+ * must call this ioctl to get an IOAS for every I/O address space
  * that is intended to be tracked by the kernel.
  *
- * User needs to specify the attributes of the IOASID and associated
+ * User needs to specify the attributes of the IOAS and associated
  * I/O page table format information according to one or multiple devices
- * which will be attached to this IOASID right after. The I/O page table
+ * which will be attached to this IOAS right after. The I/O page table
  * is activated in the IOMMU when it's attached by a device. Incompatible
- * format between device and IOASID will lead to attaching failure in
+ * format between device and IOAS will lead to attaching failure in
  * device side.
  *
- * @argsz:	    user filled size of this data.
- * @flags:	    Only IOMMU_IOASID_ATTR_ENFORCE_SNOOP is supported, and
- *		    IOMMU_IOASID_ATTR_ENFORCE_SNOOP should be set for this
- *		    version.
- * @type:	    I/O address space page table type, only kernel managed
- *		    type is supported.
- * @addr_width:    address width of the I/O address space.
+ * Currently only one flag (IOMMU_IOAS_ENFORCE_SNOOP) is supported and
+ * must be always set.
  *
- * Return: allocated ioasid on success, -errno on failure.
+ * Only one I/O page table type (kernel-managed) is supported, with vfio
+ * type1v2 mapping semantics.
+ *
+ * User should call IOMMU_CHECK_EXTENSION for future extensions.
+ *
+ * @argsz:	    user filled size of this data.
+ * @flags:	    additional information for IOAS allocation.
+ * @type:	    I/O address space page table type.
+ * @addr_width:    address width of the I/O address space.
+ * @ioas_id:	    allocated ioas id.
+ *
+ * Return: 0 on success, -errno on failure.
  */
-struct iommu_ioasid_alloc {
+struct iommu_ioas_alloc {
 	__u32	argsz;
 	__u32	flags;
-#define IOMMU_IOASID_ATTR_ENFORCE_SNOOP	(1 << 0)
+#define IOMMU_IOAS_ENFORCE_SNOOP	(1 << 0)
 	__u32	type;
-#define IOMMU_IOASID_TYPE_KERNEL	1
+#define IOMMU_IOAS_TYPE_KERNEL_TYPE1V2	1
 	__u32	addr_width;
+	__u32	ioas_id;
 };
 
-#define IOMMU_IOASID_ALLOC		_IO(IOMMU_TYPE, IOMMU_BASE + 2)
+#define IOMMU_IOAS_ALLOC		_IO(IOMMU_TYPE, IOMMU_BASE + 2)
 
 /**
- * IOMMU_IOASID_FREE - _IOWR(IOMMU_TYPE, IOMMU_BASE + 3, int)
+ * IOMMU_IOAS_FREE - _IOWR(IOMMU_TYPE, IOMMU_BASE + 3, u32)
  *
- * Free an IOASID.
+ * Free an IOAS.
  *
  * returns: 0 on success, -errno on failure
  */
 
-#define IOMMU_IOASID_FREE		_IO(IOMMU_TYPE, IOMMU_BASE + 3)
+#define IOMMU_IOAS_FREE		_IO(IOMMU_TYPE, IOMMU_BASE + 3)
 
 /*
  * Map/unmap process virtual addresses to I/O virtual addresses.
@@ -153,30 +150,27 @@ struct iommu_ioasid_alloc {
  * restriction e.g. the unmap size should match those used in the
  * original mapping call.
  *
- * Current VFIO map/unmap suffers from duplicate page pinning when multiple
- * devices share an address space (e.g. GPA), in future, root IOASID would
- * be introduced to solve such pain by allowing delayed page pinning.
- *
  * @argsz:	user filled size of this data.
- * @flags:	currently bit 0 is used to specify map or unmap.
- * @ioasid:	the handle of target I/O address space.
- * @data:	the operation payload, refer to vfio_iommu_type1_dma_{un}map
+ * @flags:	reserved for future extension.
+ * @ioas:	the handle of target I/O address space.
+ * @data:	the operation payload, refer to vfio_iommu_type1_dma_{un}map.
+ *
  * FIXME:
  *	userspace needs to include uapi/vfio.h as well as interface reuses
  *	the map/unmap logic from vfio iommu type1.
  *
  * Return: 0 on success, -errno on failure.
  */
-struct iommu_ioasid_dma_op {
+struct iommu_ioas_dma_op {
 	__u32	argsz;
 	__u32	flags;
-	__s32	ioasid;
+	__u32	ioas;
 	__u32	padding;
 	__u8	data[];
 };
 
-#define IOMMU_MAP_DMA	_IO(IOMMU_TYPE, IOMMU_BASE + 4)
-#define IOMMU_UNMAP_DMA	_IO(IOMMU_TYPE, IOMMU_BASE + 5)
+#define IOMMU_IOAS_MAP_DMA	_IO(IOMMU_TYPE, IOMMU_BASE + 4)
+#define IOMMU_IOAS_UNMAP_DMA	_IO(IOMMU_TYPE, IOMMU_BASE + 5)
 
 #define IOMMU_FAULT_PERM_READ	(1 << 0) /* read */
 #define IOMMU_FAULT_PERM_WRITE	(1 << 1) /* write */
