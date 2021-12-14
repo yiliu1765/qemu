@@ -25,6 +25,7 @@
 #include "qemu/queue.h"
 #include "qemu/thread.h"
 #include "qom/object.h"
+#include <linux/iommufd.h>
 
 int iommufd_open(void);
 void iommufd_close(int fd);

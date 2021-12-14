@@ -25,7 +25,6 @@
 #include <sys/ioctl.h>
 #include "qemu/error-report.h"
 #include "hw/iommu/iommu.h"
-#include <linux/iommu.h>
 
 int iommufd_open(void)
 {
@@ -46,35 +45,38 @@ void iommufd_close(int fd)
 
 int iommufd_alloc_ioasd(int fd, uint32_t *ioasid)
 {
-    struct iommu_ioas_alloc alloc_data;
+    struct iommu_ioas_pagetable_alloc alloc_data;
     int ret;
 
     if (fd < 0) {
         return -EINVAL;
     }
 
-    alloc_data.argsz = sizeof(alloc_data);
-    alloc_data.flags = IOMMU_IOAS_ENFORCE_SNOOP;
-    alloc_data.type = IOMMU_IOAS_TYPE_KERNEL_TYPE1V2;
-    alloc_data.addr_width = 48;
+    alloc_data.size = sizeof(alloc_data);
+    alloc_data.flags = 0;
 
-    ret = ioctl(fd, IOMMU_IOAS_ALLOC, &alloc_data);
+    ret = ioctl(fd, IOMMU_IOAS_PAGETABLE_ALLOC, &alloc_data);
     if (ret < 0) {
         error_report("Failed to allocate ioasid  %m\n");
     }
 
-    *ioasid = alloc_data.ioas_id;
+    *ioasid = alloc_data.out_ioas_id;
+
     return ret;
 }
 
 void iommufd_free_ioasd(int fd, uint32_t ioasid)
 {
+    struct iommu_destroy des;
 
     if (fd < 0) {
         return;
     }
 
-    if (ioctl(fd, IOMMU_IOAS_FREE, &ioasid)) {
+    des.size = sizeof(des);
+    des.id = ioasid;
+
+    if (ioctl(fd, IOMMU_DESTROY, &des)) {
         error_report("Failed to free ioasid: %u  %m\n", ioasid);
     }
 }

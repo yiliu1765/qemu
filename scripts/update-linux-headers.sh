@@ -145,7 +145,7 @@ done
 rm -rf "$output/linux-headers/linux"
 mkdir -p "$output/linux-headers/linux"
 for header in kvm.h vfio.h vfio_ccw.h vfio_zdev.h vhost.h \
-              psci.h psp-sev.h userfaultfd.h mman.h iommu.h; do
+              psci.h psp-sev.h userfaultfd.h mman.h iommufd.h; do
     cp "$tmpdir/include/linux/$header" "$output/linux-headers/linux"
 done
 

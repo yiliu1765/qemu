@@ -21,7 +21,6 @@
 #include "qemu/osdep.h"
 #include <linux/vfio.h>
 #include <sys/ioctl.h>
-#include <linux/iommu.h>
 
 #include "hw/hw.h"
 #include "hw/pci/msi.h"
@@ -2783,25 +2782,26 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
 }
 
 static int iommufd_device_get_info(int iommufd, int devicefd,
-                                   uint32_t devid,
-                                   struct iommu_device_info **info)
+                                   uint32_t ioasid,
+                                   struct iommu_ioas_pagetable_iova_ranges **info)
 {
-    size_t argsz = sizeof(struct iommu_device_info);
+    size_t argsz = sizeof(struct iommu_ioas_pagetable_iova_ranges);
 
-    *info = g_new0(struct iommu_device_info, 1);
+    *info = g_new0(struct iommu_ioas_pagetable_iova_ranges, 1);
 again:
-    (*info)->argsz = argsz;
-    (*info)->devid = devid;
+    (*info)->size = argsz;
+    (*info)->ioas_id = ioasid;
 
-    if (ioctl(iommufd, IOMMU_DEVICE_GET_INFO, *info)) {
+    printf("%s ioasid: %u\n", __func__, ioasid);
+    if (ioctl(iommufd, IOMMU_IOAS_PAGETABLE_IOVA_RANGES, *info)) {
         printf("error to get info %m\n");
         g_free(*info);
         *info = NULL;
         return -errno;
     }
 
-    if (((*info)->argsz > argsz)) {
-        argsz = (*info)->argsz;
+    if (((*info)->size > argsz)) {
+        argsz = (*info)->size;
         *info = g_realloc(*info, argsz);
         goto again;
     }
@@ -2809,56 +2809,20 @@ again:
     return 0;
 }
 
-static struct vfio_info_cap_header *
-get_iommu_info_cap(struct iommu_device_info *info, uint16_t id)
+static void get_device_iova_ranges(struct iommu_ioas_pagetable_iova_ranges *info)
 {
-    struct vfio_info_cap_header *hdr;
-    void *ptr = info;
-
-    if (!(info->flags & IOMMU_DEVICE_INFO_CAPS)) {
-        return NULL;
-    }
-
-    for (hdr = ptr + info->cap_offset; hdr != ptr; hdr = ptr + hdr->next) {
-	    printf("%s hdr->id: %u\n", __func__, hdr->id);
-        if (hdr->id == id) {
-            return hdr;
-        }
-    }
-
-    return NULL;
-}
-
-static void get_device_iova_ranges(struct iommu_device_info *info)
-{
-    struct vfio_info_cap_header *hdr;
-    struct vfio_iommu_type1_info_cap_iova_range *cap_iova_range;
     int i;
 
-    hdr = get_iommu_info_cap(info, VFIO_IOMMU_TYPE1_INFO_CAP_IOVA_RANGE);
-    if (!hdr) {
-	    return;
-    }
-
-    cap_iova_range = container_of(hdr, struct vfio_iommu_type1_info_cap_iova_range,
-                                  header);
-
-    for (i = 0; i < cap_iova_range->nr_iovas; i++) {
-        printf("cap_iova_range->iova_ranges[%d].start: 0x%llx, end: 0x%llx\n", i, cap_iova_range->iova_ranges[i].start, cap_iova_range->iova_ranges[i].end);
+    for (i = 0; i < info->out_num_iovas; i++) {
+        printf("out_valid_iovas[%d].start: 0x%llx, last: 0x%llx\n", i, info->out_valid_iovas[i].start, info->out_valid_iovas[i].last);
     }
 }
 
-static int check_device_iommu_info(int iommufd, int devicefd, uint32_t devid)
+static int check_device_iommu_info(int iommufd, int devicefd, uint32_t ioasid)
 {
-    struct iommu_device_info *info;
+    struct iommu_ioas_pagetable_iova_ranges *info;
 
-    if (!iommufd_device_get_info(iommufd, devicefd, devid, &info)) {
-        if (info->flags & IOMMU_DEVICE_INFO_ENFORCE_SNOOP)
-		printf("Snoop!\n");
-        if (info->flags & IOMMU_DEVICE_INFO_ADDR_WIDTH)
-		printf("addr_width: %x\n", info->addr_width);
-        if (info->flags & IOMMU_DEVICE_INFO_PGSIZES)
-		printf("pgsize_bitmap: 0x%llx\n", info->pgsize_bitmap);
+    if (!iommufd_device_get_info(iommufd, devicefd, ioasid, &info)) {
         get_device_iova_ranges(info);
 	g_free(info);
 	return 0;
@@ -2872,11 +2836,12 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 	uint32_t ioasid;
 	int rt;
 	int devicefd;
-	struct vfio_device_iommu_bind_data bind_data;
-	struct vfio_device_attach_ioas attach_data;
-	struct iommu_ioas_dma_op *op, *op2;
-	struct vfio_iommu_type1_dma_map *map;
-	struct vfio_iommu_type1_dma_unmap *unmap;
+	struct vfio_device_bind_iommufd bind;
+	struct vfio_device_attach_ioaspt attach_data;
+//	struct iommu_ioas_dma_op *op, *op2;
+//	struct vfio_iommu_type1_dma_map *map;
+//	struct vfio_iommu_type1_dma_unmap *unmap;
+	struct vfio_device_detach_ioaspt detach_data;
 
 	devicefd = qemu_open_old(device_path, O_RDWR);
 	if (devicefd < 0) {
@@ -2884,19 +2849,20 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 		return -EINVAL;
 	}
 
-	bind_data.argsz = sizeof(bind_data);
-	bind_data.flags = 0;
-	bind_data.iommufd = iommufd;
-	bind_data.dev_cookie = cookie;
+	bind.argsz = sizeof(bind);
+	bind.flags = 0;
+	bind.iommufd = iommufd;
+	bind.dev_cookie = cookie;
 
-	rt = ioctl(devicefd, VFIO_DEVICE_BIND_IOMMUFD, &bind_data);
+	rt = ioctl(devicefd, VFIO_DEVICE_BIND_IOMMUFD, &bind);
 	if (rt) {
 		printf("error bind failed, rt: %d\n", rt);
 		close(devicefd);
 		return rt;
 	}
 
-	check_device_iommu_info(iommufd, devicefd, bind_data.devid);
+	printf("bind succ, devid: %u\n", bind.out_devid);
+
 	if (flags & DEV_IOMMU_TEST_KEEP_ATTACH) {
 		ioasid = asid;
 	} else {
@@ -2909,21 +2875,23 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 		}
 	}
 
+	check_device_iommu_info(iommufd, devicefd, ioasid);
+
 	attach_data.argsz = sizeof(attach_data);
 	attach_data.flags = 0;
 	attach_data.iommufd = iommufd;
-	attach_data.ioas = ioasid;
+	attach_data.ioaspt_id = ioasid;
 
 	printf("attach ioasid: %d - 1\n", ioasid);
-	rt = ioctl(devicefd, VFIO_DEVICE_ATTACH_IOAS, &attach_data);
-	printf("attach ioasid: %d - 2, ret: %d\n", ioasid, rt);
+	rt = ioctl(devicefd, VFIO_DEVICE_ATTACH_IOASPT, &attach_data);
+	printf("attach ioasid: %d - 2, ret: %d, hwpt_id: %u\n", ioasid, rt, attach_data.out_hwpt_id);
 	if (rt) {
 		printf("error attach ioasid failed, rt: %d\n", rt);
 		iommufd_free_ioasd(iommufd, ioasid);
 		close(devicefd);
 		return rt;
 	}
-
+#if 0
 	/* Test MAP */
 	op = g_malloc0(sizeof(*op) + sizeof(*map));
 	op->argsz = sizeof(*op) + sizeof(*map);
@@ -2976,13 +2944,19 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 	munmap((void *)map->vaddr, map->size);
 	g_free(op);
 
+#endif
 	if (flags & DEV_IOMMU_TEST_KEEP_ATTACH) {
 		printf("device: %s attached with :%d\n", device_path, ioasid);
 		return devicefd;
 	}
 
+	detach_data.argsz = sizeof(detach_data);
+	detach_data.flags = 0;
+	detach_data.iommufd = iommufd;
+	detach_data.ioaspt_id = ioasid;
+
 	printf("detach ioasid: %d - 1\n", ioasid);
-	rt = ioctl(devicefd, VFIO_DEVICE_DETACH_IOAS, &attach_data);
+	rt = ioctl(devicefd, VFIO_DEVICE_DETACH_IOASPT, &attach_data);
 	printf("detach ioasid: %d - 2, ret: %d\n", ioasid, rt);
 
 	printf("try to free ioasid: %d - 1\n", ioasid);
@@ -2993,17 +2967,17 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 	close(devicefd);
 	return 0;
 }
-
+#if 0
 static void test_multi_device_group(int iommufd)
 {
 	uint32_t ioasid;
         int rt, idx, j;
 	int devicefds[8];
 	char *device_paths[8];
-	struct vfio_device_attach_ioas attach_data;
+	struct vfio_device_detach_ioaspt detach_data;
 
 	rt = iommufd_alloc_ioasd(iommufd, &ioasid);
-	printf("ioasid: %d\n", ioasid);
+	printf("%s ioasid: %d\n", __func__, ioasid);
 	if (rt < 0) {
 		printf("alloc ioasid failed, rt: %d\n", rt);
 		return;
@@ -3011,7 +2985,7 @@ static void test_multi_device_group(int iommufd)
 
 	for (idx = 0; idx < 8; idx++) {
 		device_paths[idx] = g_strdup_printf("/dev/vfio/devices/vfio%d", idx + 2);
-		printf("%s\n", device_paths[idx]);
+		printf("%s %s\n", __func__, device_paths[idx]);
 		rt = test_device_interface(iommufd, device_paths[idx], (uint64_t)idx, DEV_IOMMU_TEST_KEEP_ATTACH, ioasid);
 		if (rt < 0) {
 			printf("error devicefds[%d]: %d\n", idx, devicefds[idx]);
@@ -3026,12 +3000,12 @@ static void test_multi_device_group(int iommufd)
 //		if (j == 3) {
 //			continue;
 //		}
-		attach_data.argsz = sizeof(attach_data);
-		attach_data.flags = 0;
-		attach_data.iommufd = iommufd;
-		attach_data.ioas = ioasid;
+		detach_data.argsz = sizeof(detach_data);
+		detach_data.flags = 0;
+		detach_data.iommufd = iommufd;
+		detach_data.ioaspt_id = ioasid;
 
-		ret = ioctl(devicefds[j], VFIO_DEVICE_DETACH_IOAS, &attach_data);
+		ret = ioctl(devicefds[j], VFIO_DEVICE_DETACH_IOASPT, &detach_data);
 		printf("detach ioasid: %d, on %s ret: %d and then close devicefd\n", ioasid, device_paths[j], ret);
 		close(devicefds[j]);
 		g_free(device_paths[j]);
@@ -3039,7 +3013,7 @@ static void test_multi_device_group(int iommufd)
 	printf("try to free ioasid: %d\n", ioasid);
 	iommufd_free_ioasd(iommufd, ioasid);
 }
-
+#endif
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOPCIDevice *vdev = VFIO_PCI(pdev);
@@ -3110,14 +3084,14 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
                             vdev->host.slot, vdev->host.function);
 			    */
         device_path = g_strdup_printf("/dev/vfio/devices/vfio%d", 0);
-	printf("%s\n", device_path);
+	printf("%s %s\n", __func__, device_path);
 
 	rt = test_device_interface(iommufd, device_path, (uint64_t)vdev, 0, 0);
 	if (rt < 0) {
 		printf("Test failed %d\n", rt);
 	}
 	g_free(device_path);
-	test_multi_device_group(iommufd);
+//	test_multi_device_group(iommufd);
 	iommufd_close(iommufd);
     }
 
