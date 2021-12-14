@@ -2830,6 +2830,68 @@ static int check_device_iommu_info(int iommufd, int devicefd, uint32_t ioasid)
     return -EINVAL;
 }
 
+static int test_dma(int iommufd, uint32_t ioasid)
+{
+	struct iommu_ioas_pagetable_map map;
+	struct iommu_ioas_pagetable_unmap unmap;
+	int rt;
+
+	/* Test MAP */
+	memset(&map, 0x0, sizeof(map));
+	map.size = sizeof(map);
+	map.flags = IOMMU_IOAS_PAGETABLE_MAP_WRITEABLE |
+		    IOMMU_IOAS_PAGETABLE_MAP_READABLE;
+	map.ioas_id = ioasid;
+
+	/* Allocate some space and setup a DMA mapping */
+	map.user_va = (__u64)(uintptr_t)mmap(0, 1024 * 1024, PROT_READ | PROT_WRITE,
+					     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+	printf("map.user_va: %llx\n", (unsigned long long)map.user_va);
+	map.length = 1024 * 1024;
+
+	printf("map\n");
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_MAP, &map);
+	if (rt) {
+		printf("map failed %m\n");
+		goto out;
+	}
+	printf("mapped, allocated iova: %llx\n", (unsigned long long) map.iova);
+
+	memset(&unmap, 0x0, sizeof(unmap));
+	unmap.size = sizeof(unmap);
+	unmap.ioas_id = ioasid;
+	unmap.iova = map.iova;
+	unmap.length = map.length;
+
+	printf("unmap\n");
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_UNMAP, &unmap);
+	if (rt) {
+		printf("unmap failed %m\n");
+		goto out;
+	}
+
+	/* Test fixed IOVA */
+	map.iova += 0x1000;
+	map.flags |= IOMMU_IOAS_PAGETABLE_MAP_FIXED_IOVA;
+	printf("map with fixed iova: %llx\n", (unsigned long long) map.iova);
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_MAP, &map);
+	if (rt) {
+		printf("map failed %m\n");
+		goto out;
+	}
+	printf("unmap\n");
+	unmap.iova = map.iova;
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_UNMAP, &unmap);
+	if (rt) {
+		printf("unmap failed %m\n");
+		goto out;
+	}
+
+out:
+	munmap((void *)map.user_va, map.length);
+	return rt;
+}
+
 #define DEV_IOMMU_TEST_KEEP_ATTACH (1 << 0)
 static int test_device_interface(int iommufd, char *device_path, uint64_t cookie, uint32_t flags, uint32_t asid)
 {
@@ -2838,9 +2900,6 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 	int devicefd;
 	struct vfio_device_bind_iommufd bind;
 	struct vfio_device_attach_ioaspt attach_data;
-//	struct iommu_ioas_dma_op *op, *op2;
-//	struct vfio_iommu_type1_dma_map *map;
-//	struct vfio_iommu_type1_dma_unmap *unmap;
 	struct vfio_device_detach_ioaspt detach_data;
 
 	devicefd = qemu_open_old(device_path, O_RDWR);
@@ -2891,60 +2950,13 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 		close(devicefd);
 		return rt;
 	}
-#if 0
-	/* Test MAP */
-	op = g_malloc0(sizeof(*op) + sizeof(*map));
-	op->argsz = sizeof(*op) + sizeof(*map);
-	op->flags = 0;
-	op->ioas = ioasid;
 
-	map = (struct vfio_iommu_type1_dma_map *)&op->data;
-	map->argsz = sizeof(*map);
-	/* Allocate some space and setup a DMA mapping */
-	map->vaddr = (__u64)(uintptr_t)mmap(0, 1024 * 1024, PROT_READ | PROT_WRITE,
-					     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
-	printf("map->vaddr: %llx\n", (unsigned long long)map->vaddr);
-	map->size = 1024 * 1024;
-	map->iova = 0; /* 1MB starting at 0x0 from device view */
-	map->flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
 
-	printf("map\n");
-	rt = ioctl(iommufd, IOMMU_IOAS_MAP_DMA, op);
+	rt = test_dma(iommufd, ioasid);
 	if (rt) {
-		printf("map failed %m\n");
-		munmap((void *)map->vaddr, map->size);
-		g_free(op);
-		iommufd_free_ioasd(iommufd, ioasid);
-		close(devicefd);
-		return rt;
+		printf("dma test failed\n");
 	}
 
-	op2 = g_malloc0(sizeof(*op2) + sizeof(*unmap));
-	op2->argsz = sizeof(*op2) + sizeof(*unmap);
-	op2->flags = 0;
-	op2->ioas = ioasid;
-	unmap = (struct vfio_iommu_type1_dma_unmap *)&op2->data;
-	unmap->argsz = sizeof(*unmap);
-	unmap->size = 1024 * 1024;
-	unmap->iova = 0; /* 1MB starting at 0x0 from device view */
-	unmap->flags = 0;
-	printf("unmap\n");
-	rt = ioctl(iommufd, IOMMU_IOAS_UNMAP_DMA, op2);
-	if (rt) {
-		printf("unmap failed %m\n");
-		g_free(op2);
-		munmap((void *)map->vaddr, map->size);
-		g_free(op);
-		iommufd_free_ioasd(iommufd, ioasid);
-		close(devicefd);
-		return rt;
-	}
-
-	g_free(op2);
-	munmap((void *)map->vaddr, map->size);
-	g_free(op);
-
-#endif
 	if (flags & DEV_IOMMU_TEST_KEEP_ATTACH) {
 		printf("device: %s attached with :%d\n", device_path, ioasid);
 		return devicefd;
