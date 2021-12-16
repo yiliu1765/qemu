@@ -2892,21 +2892,108 @@ out:
 	return rt;
 }
 
-#define DEV_IOMMU_TEST_KEEP_ATTACH (1 << 0)
-static int test_device_interface(int iommufd, char *device_path, uint64_t cookie, uint32_t flags, uint32_t asid)
+static int test_dma_copy(int iommufd, uint32_t ioasid1, uint32_t ioasid2)
 {
-	uint32_t ioasid;
+	struct iommu_ioas_pagetable_map map;
+	struct iommu_ioas_pagetable_unmap unmap;
+	struct iommu_ioas_pagetable_copy copy;
 	int rt;
-	int devicefd;
-	struct vfio_device_bind_iommufd bind;
-	struct vfio_device_attach_ioaspt attach_data;
-	struct vfio_device_detach_ioaspt detach_data;
 
-	devicefd = qemu_open_old(device_path, O_RDWR);
-	if (devicefd < 0) {
-		printf("error devicefd: %d\n", devicefd);
-		return -EINVAL;
+	/* Prepare MAP  on ioasid1 */
+	memset(&map, 0x0, sizeof(map));
+	map.size = sizeof(map);
+	map.flags = IOMMU_IOAS_PAGETABLE_MAP_WRITEABLE |
+		    IOMMU_IOAS_PAGETABLE_MAP_READABLE;
+	map.ioas_id = ioasid1;
+
+	/* Allocate some space and setup a DMA mapping */
+	map.user_va = (__u64)(uintptr_t)mmap(0, 1024 * 1024, PROT_READ | PROT_WRITE,
+					     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+	printf("map.user_va: %llx\n", (unsigned long long)map.user_va);
+	map.length = 1024 * 1024;
+
+	printf("map on ioasid: %u\n", ioasid1);
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_MAP, &map);
+	if (rt) {
+		printf("map failed %m\n");
+		goto out_free;
 	}
+	printf("mapped, allocated iova: %llx\n", (unsigned long long) map.iova);
+
+	/* copy to ioasid2 without fixed iova */
+	memset(&copy, 0x0, sizeof(copy));
+	copy.size = sizeof(copy);
+	copy.dst_ioas_id = ioasid2;
+	copy.src_ioas_id = ioasid1;
+	copy.length = map.length;
+	copy.src_iova = map.iova;
+	copy.flags = IOMMU_IOAS_PAGETABLE_MAP_WRITEABLE |
+		     IOMMU_IOAS_PAGETABLE_MAP_READABLE;
+
+	printf("copy to ioasid2 w/o fixed iova\n");
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_COPY, &copy);
+	if (rt) {
+		printf("copy failed %m\n");
+		goto out_unmap_ioasid1;
+	}
+
+	memset(&unmap, 0x0, sizeof(unmap));
+	unmap.size = sizeof(unmap);
+	unmap.ioas_id = copy.dst_ioas_id;
+	unmap.iova = copy.dst_iova;
+	unmap.length = copy.length;
+
+	printf("unmap non-fixed iova on ioasid2\n");
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_UNMAP, &unmap);
+	if (rt) {
+		printf("unmap failed %m\n");
+		goto out_unmap_ioasid1;
+	}
+
+	/* copy to ioasid2 with fixed iova */
+	copy.dst_iova = copy.dst_iova + 0x400000;
+	copy.flags |= IOMMU_IOAS_PAGETABLE_MAP_FIXED_IOVA;
+
+	printf("copy to ioasid2 w/ fixed iova: %llx\n", (unsigned long long)copy.dst_iova);
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_COPY, &copy);
+	if (rt) {
+		printf("copy w/ fixed iova failed %m\n");
+		goto out_unmap_ioasid1;
+	}
+
+	memset(&unmap, 0x0, sizeof(unmap));
+	unmap.size = sizeof(unmap);
+	unmap.ioas_id = copy.dst_ioas_id;
+	unmap.iova = copy.dst_iova;
+	unmap.length = copy.length;
+
+	printf("unmap fixed iova on ioasid2\n");
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_UNMAP, &unmap);
+	if (rt) {
+		printf("unmap failed %m\n");
+	}
+
+out_unmap_ioasid1:
+	memset(&unmap, 0x0, sizeof(unmap));
+	unmap.size = sizeof(unmap);
+	unmap.ioas_id = map.ioas_id;
+	unmap.iova = map.iova;
+	unmap.length = map.length;
+
+	printf("unmap ioasid1\n");
+	rt = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_UNMAP, &unmap);
+	if (rt) {
+		printf("unmap failed %m\n");
+	}
+out_free:
+	munmap((void *)map.user_va, map.length);
+	return rt;
+}
+
+static int device_bind_iommufd(int devicefd, int iommufd, uint64_t cookie)
+{
+	struct vfio_device_bind_iommufd bind;
+	int rt;
 
 	bind.argsz = sizeof(bind);
 	bind.flags = 0;
@@ -2916,25 +3003,17 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 	rt = ioctl(devicefd, VFIO_DEVICE_BIND_IOMMUFD, &bind);
 	if (rt) {
 		printf("error bind failed, rt: %d\n", rt);
-		close(devicefd);
-		return rt;
-	}
-
-	printf("bind succ, devid: %u\n", bind.out_devid);
-
-	if (flags & DEV_IOMMU_TEST_KEEP_ATTACH) {
-		ioasid = asid;
 	} else {
-		rt = iommufd_alloc_ioasd(iommufd, &ioasid);
-		printf("ioasid: %d\n", ioasid);
-		if (rt < 0) {
-			printf("alloc ioasid failed, rt: %d\n", rt);
-			close(devicefd);
-			return -EINVAL;
-		}
+		printf("bind succ for devicefd: %d, devid: %u\n", devicefd, bind.out_devid);
 	}
 
-	check_device_iommu_info(iommufd, devicefd, ioasid);
+	return rt;
+}
+
+static int device_attach_ioasid(int devicefd, int iommufd, uint32_t ioasid)
+{
+	struct vfio_device_attach_ioaspt attach_data;
+	int rt;
 
 	attach_data.argsz = sizeof(attach_data);
 	attach_data.flags = 0;
@@ -2946,21 +3025,14 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 	printf("attach ioasid: %d - 2, ret: %d, hwpt_id: %u\n", ioasid, rt, attach_data.out_hwpt_id);
 	if (rt) {
 		printf("error attach ioasid failed, rt: %d\n", rt);
-		iommufd_free_ioasd(iommufd, ioasid);
-		close(devicefd);
-		return rt;
 	}
+	return rt;
+}
 
-
-	rt = test_dma(iommufd, ioasid);
-	if (rt) {
-		printf("dma test failed\n");
-	}
-
-	if (flags & DEV_IOMMU_TEST_KEEP_ATTACH) {
-		printf("device: %s attached with :%d\n", device_path, ioasid);
-		return devicefd;
-	}
+static void device_detach_ioasid(int devicefd, int iommufd, uint32_t ioasid)
+{
+	struct vfio_device_detach_ioaspt detach_data;
+	int rt;
 
 	detach_data.argsz = sizeof(detach_data);
 	detach_data.flags = 0;
@@ -2968,23 +3040,117 @@ static int test_device_interface(int iommufd, char *device_path, uint64_t cookie
 	detach_data.ioaspt_id = ioasid;
 
 	printf("detach ioasid: %d - 1\n", ioasid);
-	rt = ioctl(devicefd, VFIO_DEVICE_DETACH_IOASPT, &attach_data);
+	rt = ioctl(devicefd, VFIO_DEVICE_DETACH_IOASPT, &detach_data);
 	printf("detach ioasid: %d - 2, ret: %d\n", ioasid, rt);
+}
 
-	printf("try to free ioasid: %d - 1\n", ioasid);
-	iommufd_free_ioasd(iommufd, ioasid);
-	printf("try to free ioasid: %d - 2\n", ioasid);
+static int device_test_preparation(int devicefd, int iommufd, uint64_t cookie, uint32_t ioasid)
+{
+	int rt;
 
-	printf("close devicefd\n");
-	close(devicefd);
+	rt = device_bind_iommufd(devicefd, iommufd, cookie);
+	if (rt) {
+		return rt;
+	}
+
+	rt = device_attach_ioasid(devicefd, iommufd, ioasid);
+	if (rt) {
+		return rt;
+	}
+
+	check_device_iommu_info(iommufd, devicefd, ioasid);
 	return 0;
+}
+
+#define IOMMUFD_TEST_DMA_COPY (1 << 0)
+/*
+ * @device_path2 and @cookie2 are used only when IOMMUFD_TEST_DMA_COPY is set
+ * */
+static int test_device_interface(int iommufd, char *device_path1, char *device_path2, uint64_t cookie1, uint64_t cookie2, uint32_t ioasid, uint32_t flags)
+{
+	int rt, devicefd1, devicefd2;
+
+	/* cookie expired */
+	if (cookie1 == 0 || ((flags & IOMMUFD_TEST_DMA_COPY) && cookie2 == 0)) {
+		return -EINVAL;
+	}
+
+	devicefd1 = qemu_open_old(device_path1, O_RDWR);
+	if (devicefd1 < 0) {
+		printf("error devicefd1: %d\n", devicefd1);
+		return -EINVAL;
+	}
+
+	printf("Test %s, fd: %d, cookie: %llx\n", device_path1, devicefd1, (unsigned long long)cookie1);
+
+	rt = device_test_preparation(devicefd1, iommufd, cookie1, ioasid);
+	if (rt) {
+		close(devicefd1);
+		return rt;
+	}
+
+	printf("============== Test normal dma with: %s\n", device_path1);
+	rt = test_dma(iommufd, ioasid);
+	if (rt) {
+		printf("dma test failed\n");
+		goto out;
+	}
+	printf("test ends ==============\n");
+
+	if (flags & IOMMUFD_TEST_DMA_COPY) {
+		uint32_t ioasid2;
+
+		rt = iommufd_alloc_ioasd(iommufd, &ioasid2);
+		if (rt < 0) {
+			printf("failed to alloc ioasid for dma copy, rt: %d\n", rt);
+			goto out;
+		}
+		printf("%s allocate ioasid: %d for dma copy\n", __func__, ioasid2);
+
+		devicefd2 = qemu_open_old(device_path2, O_RDWR);
+		if (devicefd2 < 0) {
+			printf("error open %s\n", device_path2);
+			iommufd_free_ioasd(iommufd, ioasid2);
+			rt = -EINVAL;
+			goto out;
+		}
+
+		printf("use %s, fd: %d, cookie: %llx for dma copy test\n", device_path2, devicefd2, (unsigned long long)cookie2);
+
+		rt = device_test_preparation(devicefd2, iommufd, cookie2, ioasid2);
+		if (rt) {
+			printf("error prepare test for devicefd2: %d\n", devicefd2);
+			close(devicefd2);
+			iommufd_free_ioasd(iommufd, ioasid2);
+			goto out;
+		}
+
+		printf("============== Test dma copy with: %s and %s\n", device_path1, device_path2);
+		rt = test_dma_copy(iommufd, ioasid, ioasid2);
+		if (rt) {
+			printf("dma copy test failed\n");
+		} else {
+			printf("dma copy test succ\n");
+		}
+		printf("test ends ==============\n");
+
+		device_detach_ioasid(devicefd2, iommufd, ioasid2);
+		close(devicefd2);
+		iommufd_free_ioasd(iommufd, ioasid2);
+	}
+
+out:
+	device_detach_ioasid(devicefd1, iommufd, ioasid);
+	printf("close devicefd1\n");
+	close(devicefd1);
+	return rt;
 }
 #if 0
 static void test_multi_device_group(int iommufd)
 {
 	uint32_t ioasid;
         int rt, idx, j;
-	int devicefds[8];
+	int sdf[8];
 	char *device_paths[8];
 	struct vfio_device_detach_ioaspt detach_data;
 
@@ -2998,12 +3164,12 @@ static void test_multi_device_group(int iommufd)
 	for (idx = 0; idx < 8; idx++) {
 		device_paths[idx] = g_strdup_printf("/dev/vfio/devices/vfio%d", idx + 2);
 		printf("%s %s\n", __func__, device_paths[idx]);
-		rt = test_device_interface(iommufd, device_paths[idx], (uint64_t)idx, DEV_IOMMU_TEST_KEEP_ATTACH, ioasid);
+		rt = test_device_interface(iommufd, device_paths[idx], (uint64_t)idx, IOMMUFD_TEST_DMA_COPY, ioasid);
 		if (rt < 0) {
-			printf("error devicefds[%d]: %d\n", idx, devicefds[idx]);
+			printf("error sdf[%d]: %d\n", idx, sdf[idx]);
 			break;
 		}
-		devicefds[idx] = rt;
+		sdf[idx] = rt;
 	}
 
 	for (j = 0; j < idx; j++) {
@@ -3017,15 +3183,91 @@ static void test_multi_device_group(int iommufd)
 		detach_data.iommufd = iommufd;
 		detach_data.ioaspt_id = ioasid;
 
-		ret = ioctl(devicefds[j], VFIO_DEVICE_DETACH_IOASPT, &detach_data);
+		ret = ioctl(sdf[j], VFIO_DEVICE_DETACH_IOASPT, &detach_data);
 		printf("detach ioasid: %d, on %s ret: %d and then close devicefd\n", ioasid, device_paths[j], ret);
-		close(devicefds[j]);
+		close(sdf[j]);
 		g_free(device_paths[j]);
 	}
 	printf("try to free ioasid: %d\n", ioasid);
 	iommufd_free_ioasd(iommufd, ioasid);
 }
 #endif
+
+static uint64_t device_cookie_count = 1;
+/*
+ * Just a simple way to get device cookies, formal code should
+ * mapp the cookie with VFIODevice.
+ */
+static uint64_t get_device_cookie(void)
+{
+    return (device_cookie_count == (~(1ULL) + 1)) ? 0 : device_cookie_count++;
+}
+
+static int test_iommufd(void)
+{
+    int  iommufd, rt;
+    uint32_t ioasid;
+    char *device_path;
+
+    iommufd = iommufd_open();
+    if (iommufd < 0) {
+        printf("%s iommufd open error\n", __func__);
+	return -ENODEV;
+    }
+
+    rt = iommufd_alloc_ioasd(iommufd, &ioasid);
+    printf("%s ioasid: %d\n", __func__, ioasid);
+    if (rt < 0) {
+        printf("alloc ioasid failed, rt: %d\n", rt);
+	goto out_close_fd;
+    }
+
+    /* Test /dev/vfio/devices/vfio0 */
+    device_path = g_strdup_printf("/dev/vfio/devices/vfio%d", 0);
+    printf("Test %s\n", device_path);
+
+    rt = test_device_interface(iommufd, device_path, NULL, get_device_cookie(),0, ioasid, 0);
+    if (rt < 0) {
+        printf("Test failed %d\n", rt);
+	goto out_free;
+    }
+    g_free(device_path);
+
+    /* Test /dev/vfio/devices/vfio0 */
+    device_path = g_strdup_printf("/dev/vfio/devices/vfio%d", 1);
+
+    rt = test_device_interface(iommufd, device_path, NULL, get_device_cookie(),0, ioasid, 0);
+    if (rt < 0) {
+        printf("Test failed %d\n", rt);
+	goto out_free;
+    }
+    g_free(device_path);
+
+    /* Test dma copy with */
+    device_path = g_strdup_printf("/dev/vfio/devices/vfio%d", 0);
+    if (1) {
+        char *device_path2;
+
+        device_path2 = g_strdup_printf("/dev/vfio/devices/vfio%d", 1);
+        rt = test_device_interface(iommufd, device_path, device_path2, get_device_cookie(), get_device_cookie(), ioasid, IOMMUFD_TEST_DMA_COPY);
+        if (rt < 0) {
+            printf("Test failed %d\n", rt);
+            g_free(device_path2);
+            goto out_free;
+        }
+
+    }
+
+    //test_multi_device_group(iommufd);
+out_free:
+    g_free(device_path);
+    iommufd_free_ioasd(iommufd, ioasid);
+out_close_fd:
+    iommufd_close(iommufd);
+
+    return rt;
+}
+
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOPCIDevice *vdev = VFIO_PCI(pdev);
@@ -3035,7 +3277,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     Error *err = NULL;
     ssize_t len;
     struct stat st;
-    int groupid, iommufd;
+    int groupid;
     int i, ret;
     bool is_mdev;
 
@@ -3084,27 +3326,8 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
 
     trace_vfio_realize(vdev->vbasedev.name, groupid);
 
-    iommufd = iommufd_open();
-    if (iommufd < 0) {
-        printf("error\n");
-    } else {
-        int rt;
-	char *device_path;
-/*
-        device_path = g_strdup_printf("/dev/vfio/devices/%04x:%02x:%02x.%01x",
-                            vdev->host.domain, vdev->host.bus,
-                            vdev->host.slot, vdev->host.function);
-			    */
-        device_path = g_strdup_printf("/dev/vfio/devices/vfio%d", 0);
-	printf("%s %s\n", __func__, device_path);
-
-	rt = test_device_interface(iommufd, device_path, (uint64_t)vdev, 0, 0);
-	if (rt < 0) {
-		printf("Test failed %d\n", rt);
-	}
-	g_free(device_path);
-//	test_multi_device_group(iommufd);
-	iommufd_close(iommufd);
+    if (test_iommufd()) {
+	printf("Test iommufd failed\n");
     }
 
     group = vfio_get_group(groupid, pci_device_iommu_address_space(pdev), errp);
