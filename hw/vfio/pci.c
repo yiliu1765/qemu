@@ -2803,6 +2803,7 @@ again:
     if (((*info)->size > argsz)) {
         argsz = (*info)->size;
         *info = g_realloc(*info, argsz);
+        memset(*info, 0x0, argsz);
         goto again;
     }
 
