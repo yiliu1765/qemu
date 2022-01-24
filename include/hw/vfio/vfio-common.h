@@ -79,6 +79,8 @@ struct VFIOGroup;
 typedef struct VFIOContainer {
     VFIOAddressSpace *space;
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
+    int iommufd;
+    uint64_t ioaspt_id;
     MemoryListener listener;
     MemoryListener prereg_listener;
     unsigned iommu_type;
@@ -216,6 +218,10 @@ int vfio_get_device(VFIOGroup *group, const char *name,
 extern const MemoryRegionOps vfio_region_ops;
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
 extern VFIOGroupList vfio_group_list;
+
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
+void vfio_kvm_device_add_group(VFIOGroup *group);
+void vfio_kvm_device_del_group(VFIOGroup *group);
 
 bool vfio_mig_active(void);
 int64_t vfio_mig_bytes_transferred(void);

@@ -1763,7 +1763,7 @@ void vfio_reset_handler(void *opaque)
     }
 }
 
-static void vfio_kvm_device_add_group(VFIOGroup *group)
+void vfio_kvm_device_add_group(VFIOGroup *group)
 {
 #ifdef CONFIG_KVM
     struct kvm_device_attr attr = {
@@ -1796,7 +1796,7 @@ static void vfio_kvm_device_add_group(VFIOGroup *group)
 #endif
 }
 
-static void vfio_kvm_device_del_group(VFIOGroup *group)
+void vfio_kvm_device_del_group(VFIOGroup *group)
 {
 #ifdef CONFIG_KVM
     struct kvm_device_attr attr = {
@@ -1816,7 +1816,7 @@ static void vfio_kvm_device_del_group(VFIOGroup *group)
 #endif
 }
 
-static VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
 {
     VFIOAddressSpace *space;
 

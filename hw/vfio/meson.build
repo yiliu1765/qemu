@@ -1,6 +1,7 @@
 vfio_ss = ss.source_set()
 vfio_ss.add(files(
   'common.c',
+  'device.c',
   'spapr.c',
   'migration.c',
 ))

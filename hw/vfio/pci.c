@@ -2780,6 +2780,83 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
     vdev->req_enabled = false;
 }
 
+static int vfio_get_devicefd(const char *sysfs_path, Error **errp)
+{
+    int vfio_id = -1, ret = 0;
+    char *path, *tmp;
+    DIR *dir;
+    struct dirent *dent;
+    struct stat st;
+    gchar *contents;
+    gsize length;
+    int major, minor;
+    dev_t vfio_devt;
+
+    path = g_strdup_printf("%s/vfio-device", sysfs_path);
+    printf("path: %s, \n", path);
+    if (stat(path, &st) < 0) {
+        error_setg_errno(errp, errno, "no such host device");
+        error_prepend(errp, VFIO_MSG_PREFIX, path);
+        return -ENOTTY;
+    }
+
+    dir = opendir(path);
+    if (!dir) {
+        ret = -ENOTTY;
+	goto out;
+    }
+
+    while ((dent = readdir(dir))) {
+        char *end_name;
+
+        if (!strncmp(dent->d_name, "vfio", 4)) {
+            vfio_id = strtol(dent->d_name + 4, &end_name, 10);
+            break;
+        }
+    }
+
+    printf("vfio_id: %d\n", vfio_id);
+    if (vfio_id == -1) {
+        ret = -ENOTTY;
+        goto out;
+    }
+
+    /* check if the major:minor matches */
+    tmp = g_strdup_printf("%s/%s/dev", path, dent->d_name);
+    if (!g_file_get_contents(tmp, &contents, &length, NULL)) {
+        error_report("failed to load \"%s\"", tmp);
+        exit(1);
+    }
+    printf("tmp: %s, content: %s, len: %ld\n", tmp, contents, length);
+    if (sscanf(contents, "%d:%d", &major, &minor) != 2) {
+        error_report("failed to load \"%s\"", tmp);
+        exit(1);
+    }
+    printf("%d, %d\n", major, minor);
+    g_free(contents);
+    g_free(tmp);
+
+    tmp = g_strdup_printf("/dev/vfio/devices/vfio%d", vfio_id);
+    if (stat(tmp, &st) < 0) {
+        error_setg_errno(errp, errno, "no such vfio device");
+        error_prepend(errp, VFIO_MSG_PREFIX, tmp);
+        ret = -ENOTTY;
+        goto out;
+    }
+    vfio_devt = makedev(major, minor);
+    printf("vfio_devt: %lu, %lu\n", vfio_devt, st.st_rdev);
+    if (st.st_rdev != vfio_devt) {
+	ret = -EINVAL;
+    } else {
+        ret = qemu_open_old(tmp, O_RDWR);
+    }
+    g_free(tmp);
+
+out:
+    g_free(path);
+    return ret;
+}
+
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOPCIDevice *vdev = VFIO_PCI(pdev);
@@ -2817,6 +2894,11 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     vdev->vbasedev.ops = &vfio_pci_ops;
     vdev->vbasedev.type = VFIO_DEVICE_TYPE_PCI;
     vdev->vbasedev.dev = DEVICE(vdev);
+
+    devfd = vfio_get_devicefd(vdev->vbasedev.sysfsdev, errp);
+    if (devfd < 0) {
+        printf("%s no direct device open, fall back to legacy\n", __func__);
+    }
 
     tmp = g_strdup_printf("%s/iommu_group", vdev->vbasedev.sysfsdev);
     len = readlink(tmp, group_path, sizeof(group_path));
