@@ -43,7 +43,7 @@ void iommufd_close(int fd)
     close(fd);
 }
 
-int iommufd_alloc_ioasd(int fd, uint32_t *ioasid)
+int iommufd_alloc_ioas(int fd, uint32_t *ioasid)
 {
     struct iommu_ioas_pagetable_alloc alloc_data;
     int ret;
@@ -65,7 +65,7 @@ int iommufd_alloc_ioasd(int fd, uint32_t *ioasid)
     return ret;
 }
 
-void iommufd_free_ioasd(int fd, uint32_t ioasid)
+void iommufd_free_ioas(int fd, uint32_t ioasid)
 {
     struct iommu_destroy des;
 
@@ -400,7 +400,7 @@ static int test_device_interface(int iommufd, char *device_path1, char *device_p
 	if (flags & IOMMUFD_TEST_DMA_COPY) {
 		uint32_t ioasid2;
 
-		rt = iommufd_alloc_ioasd(iommufd, &ioasid2);
+		rt = iommufd_alloc_ioas(iommufd, &ioasid2);
 		if (rt < 0) {
 			printf("failed to alloc ioasid for dma copy, rt: %d\n", rt);
 			goto out;
@@ -410,7 +410,7 @@ static int test_device_interface(int iommufd, char *device_path1, char *device_p
 		devicefd2 = qemu_open_old(device_path2, O_RDWR);
 		if (devicefd2 < 0) {
 			printf("error open %s\n", device_path2);
-			iommufd_free_ioasd(iommufd, ioasid2);
+			iommufd_free_ioas(iommufd, ioasid2);
 			rt = -EINVAL;
 			goto out;
 		}
@@ -421,7 +421,7 @@ static int test_device_interface(int iommufd, char *device_path1, char *device_p
 		if (rt) {
 			printf("error prepare test for devicefd2: %d\n", devicefd2);
 			close(devicefd2);
-			iommufd_free_ioasd(iommufd, ioasid2);
+			iommufd_free_ioas(iommufd, ioasid2);
 			goto out;
 		}
 
@@ -436,7 +436,7 @@ static int test_device_interface(int iommufd, char *device_path1, char *device_p
 
 		device_detach_ioasid(devicefd2, iommufd, ioasid2);
 		close(devicefd2);
-		iommufd_free_ioasd(iommufd, ioasid2);
+		iommufd_free_ioas(iommufd, ioasid2);
 	}
 
 out:
@@ -454,7 +454,7 @@ static void test_multi_device_group(int iommufd)
 	char *device_paths[8];
 	struct vfio_device_detach_ioaspt detach_data;
 
-	rt = iommufd_alloc_ioasd(iommufd, &ioasid);
+	rt = iommufd_alloc_ioas(iommufd, &ioasid);
 	printf("%s ioasid: %d\n", __func__, ioasid);
 	if (rt < 0) {
 		printf("alloc ioasid failed, rt: %d\n", rt);
@@ -489,7 +489,7 @@ static void test_multi_device_group(int iommufd)
 		g_free(device_paths[j]);
 	}
 	printf("try to free ioasid: %d\n", ioasid);
-	iommufd_free_ioasd(iommufd, ioasid);
+	iommufd_free_ioas(iommufd, ioasid);
 }
 #endif
 
@@ -503,7 +503,7 @@ static uint64_t get_device_cookie(void)
     return (device_cookie_count == (~(1ULL) + 1)) ? 0 : device_cookie_count++;
 }
 
-static int test_iommufd(void)
+int test_iommufd(void)
 {
     int  iommufd, rt;
     uint32_t ioasid;
@@ -515,7 +515,7 @@ static int test_iommufd(void)
 	return -ENODEV;
     }
 
-    rt = iommufd_alloc_ioasd(iommufd, &ioasid);
+    rt = iommufd_alloc_ioas(iommufd, &ioasid);
     printf("%s ioasid: %d\n", __func__, ioasid);
     if (rt < 0) {
         printf("alloc ioasid failed, rt: %d\n", rt);
@@ -561,7 +561,7 @@ static int test_iommufd(void)
     //test_multi_device_group(iommufd);
 out_free:
     g_free(device_path);
-    iommufd_free_ioasd(iommufd, ioasid);
+    iommufd_free_ioas(iommufd, ioasid);
 out_close_fd:
     iommufd_close(iommufd);
 

@@ -29,6 +29,7 @@
 
 int iommufd_open(void);
 void iommufd_close(int fd);
-int iommufd_alloc_ioasd(int fd, uint32_t *ioasid);
-void iommufd_free_ioasd(int fd, uint32_t ioasid);
+int iommufd_alloc_ioas(int fd, uint32_t *ioas);
+void iommufd_free_ioas(int fd, uint32_t ioas);
+int test_iommufd(void);
 #endif// HW_IOMMU_H
