@@ -80,7 +80,7 @@ typedef struct VFIOContainer {
     VFIOAddressSpace *space;
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
     int iommufd;
-    uint64_t ioaspt_id;
+    uint64_t ioas;
     MemoryListener listener;
     MemoryListener prereg_listener;
     unsigned iommu_type;
@@ -133,6 +133,7 @@ typedef struct VFIODevice {
     DeviceState *dev;
     int fd;
     int type;
+    int devid;
     bool reset_works;
     bool needs_reset;
     bool no_mmap;
@@ -220,8 +221,11 @@ typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
 extern VFIOGroupList vfio_group_list;
 
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
-void vfio_kvm_device_add_group(VFIOGroup *group);
-void vfio_kvm_device_del_group(VFIOGroup *group);
+VFIOGroup *vfio_device_get_group(int groupid, AddressSpace *as, Error **errp);
+void vfio_device_put_group(VFIOGroup *group);
+int vfio_device_get(VFIOGroup *group, const char *sysfs_path,
+                    VFIODevice *vbasedev, Error **errp);
+void vfio_device_put_base(VFIODevice *vbasedev);
 
 bool vfio_mig_active(void);
 int64_t vfio_mig_bytes_transferred(void);

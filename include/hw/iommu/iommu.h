@@ -25,11 +25,14 @@
 #include "qemu/queue.h"
 #include "qemu/thread.h"
 #include "qom/object.h"
+#include "exec/hwaddr.h"
+#include "exec/cpu-common.h"
 #include <linux/iommufd.h>
 
 int iommufd_open(void);
 void iommufd_close(int fd);
 int iommufd_alloc_ioas(int fd, uint32_t *ioas);
 void iommufd_free_ioas(int fd, uint32_t ioas);
-int test_iommufd(void);
+int iommufd_unmap_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size);
+int iommufd_map_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size, void *vaddr, bool readonly);
 #endif// HW_IOMMU_H
