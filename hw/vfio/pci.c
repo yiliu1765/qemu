@@ -2783,8 +2783,6 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOPCIDevice *vdev = VFIO_PCI(pdev);
-    VFIODevice *vbasedev_iter;
-    VFIOGroup *group;
     char *tmp, *subsys, group_path[PATH_MAX], *group_name;
     Error *err = NULL;
     ssize_t len;
@@ -2838,19 +2836,6 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
 
     trace_vfio_realize(vdev->vbasedev.name, groupid);
 
-    group = vfio_device_get_group(groupid, pci_device_iommu_address_space(pdev), errp);
-    if (!group) {
-        goto error;
-    }
-
-    QLIST_FOREACH(vbasedev_iter, &group->device_list, next) {
-        if (strcmp(vbasedev_iter->name, vdev->vbasedev.name) == 0) {
-            error_setg(errp, "device is already attached");
-            vfio_device_put_group(group);
-            goto error;
-        }
-    }
-
     /*
      * Mediated devices *might* operate compatibly with discarding of RAM, but
      * we cannot know for certain, it depends on whether the mdev vendor driver
@@ -2868,13 +2853,11 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     if (vdev->vbasedev.ram_block_discard_allowed && !is_mdev) {
         error_setg(errp, "x-balloon-allowed only potentially compatible "
                    "with mdev devices");
-        vfio_device_put_group(group);
         goto error;
     }
 
-    ret = vfio_device_get(group, vdev->vbasedev.sysfsdev, &vdev->vbasedev, errp);
+    ret = vfio_device_get(&vdev->vbasedev, groupid, pci_device_iommu_address_space(pdev), errp);
     if (ret) {
-        vfio_device_put_group(group);
         goto error;
     }
 
@@ -3106,7 +3089,6 @@ error:
 static void vfio_instance_finalize(Object *obj)
 {
     VFIOPCIDevice *vdev = VFIO_PCI(obj);
-    VFIOGroup *group = vdev->vbasedev.group;
 
     vfio_display_finalize(vdev);
     vfio_bars_finalize(vdev);
@@ -3120,7 +3102,6 @@ static void vfio_instance_finalize(Object *obj)
      * g_free(vdev->igd_opregion);
      */
     vfio_put_device(vdev);
-    vfio_device_put_group(group);
 }
 
 static void vfio_exitfn(PCIDevice *pdev)

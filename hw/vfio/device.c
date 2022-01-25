@@ -705,290 +705,6 @@ static int vfio_ram_block_discard_disable(VFIOContainer *container, bool state)
     }
 }
 
-static int vfio_device_bind_iommufd(VFIODevice *vbasedev, int iommufd)
-{
-    struct vfio_device_bind_iommufd bind;
-    int ret;
-
-    bind.argsz = sizeof(bind);
-    bind.flags = 0;
-    bind.iommufd = iommufd;
-    bind.dev_cookie = (uint64_t)vbasedev;
-
-    ret = ioctl(vbasedev->fd, VFIO_DEVICE_BIND_IOMMUFD, &bind);
-    if (ret) {
-        printf("error bind failed, rt: %d\n", ret);
-    } else {
-        vbasedev->devid = bind.out_devid;
-        printf("bind succ for devicefd: %d, devid: %u\n", vbasedev->fd, bind.out_devid);
-    }
-
-    return ret;
-}
-
-static int vfio_device_attach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
-{
-	struct vfio_device_attach_ioaspt attach_data;
-	int ret;
-
-	attach_data.argsz = sizeof(attach_data);
-	attach_data.flags = 0;
-	attach_data.iommufd = iommufd;
-	attach_data.ioaspt_id = ioas;
-
-	printf("attach ioas: %u - 1\n", ioas);
-	ret = ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOASPT, &attach_data);
-	printf("attach ioas: %u - 2, ret: %d, hwpt_id: %u\n", ioas, ret, attach_data.out_hwpt_id);
-	if (ret) {
-		printf("error attach ioas failed, rt: %d\n", ret);
-	}
-	return ret;
-}
-
-static void vfio_device_detach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
-{
-	struct vfio_device_detach_ioaspt detach_data;
-	int ret;
-
-	detach_data.argsz = sizeof(detach_data);
-	detach_data.flags = 0;
-	detach_data.iommufd = iommufd;
-	detach_data.ioaspt_id = ioas;
-
-	printf("detach ioas: %d - 1\n", ioas);
-	ret = ioctl(vbasedev->fd, VFIO_DEVICE_DETACH_IOASPT, &detach_data);
-	printf("detach ioas: %d - 2, ret: %d\n", ioas, ret);
-}
-
-static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
-                                  Error **errp)
-{
-    VFIOContainer *container;
-    int ret, fd;
-    uint32_t ioas, iova_pgsizes;
-    VFIOAddressSpace *space;
-
-    space = vfio_get_address_space(as);
-
-    /*
-     * VFIO is currently incompatible with discarding of RAM insofar as the
-     * madvise to purge (zap) the page from QEMU's address space does not
-     * interact with the memory API and therefore leaves stale virtual to
-     * physical mappings in the IOMMU if the page was previously pinned.  We
-     * therefore set discarding broken for each group added to a container,
-     * whether the container is used individually or shared.  This provides
-     * us with options to allow devices within a group to opt-in and allow
-     * discarding, so long as it is done consistently for a group (for instance
-     * if the device is an mdev device where it is known that the host vendor
-     * driver will never pin pages outside of the working set of the guest
-     * driver, which would thus not be discarding candidates).
-     *
-     * The first opportunity to induce pinning occurs here where we attempt to
-     * attach the group to existing containers within the AddressSpace.  If any
-     * pages are already zapped from the virtual address space, such as from
-     * previous discards, new pinning will cause valid mappings to be
-     * re-established.  Likewise, when the overall MemoryListener for a new
-     * container is registered, a replay of mappings within the AddressSpace
-     * will occur, re-establishing any previously zapped pages as well.
-     *
-     * Especially virtio-balloon is currently only prevented from discarding
-     * new memory, it will not yet set ram_block_discard_set_required() and
-     * therefore, neither stops us here or deals with the sudden memory
-     * consumption of inflated memory.
-     *
-     * We do support discarding of memory coordinated via the RamDiscardManager
-     * with some IOMMU types. vfio_ram_block_discard_disable() handles the
-     * details once we know which type of IOMMU we are using.
-     */
-
-    QLIST_FOREACH(container, &space->containers, next) {
-        ret = vfio_ram_block_discard_disable(container, true);
-        if (ret) {
-            error_setg_errno(errp, -ret,
-                             "Cannot set discarding of RAM broken");
-            return ret;
-        }
-        group->container = container;
-        QLIST_INSERT_HEAD(&container->group_list, group, container_next);
-//        vfio_kvm_device_add_group(group);
-        return 0;
-    }
-
-    fd = iommufd_open();
-
-    ret = iommufd_alloc_ioas(fd, &ioas);
-    if (ret < 0) {
-        printf("alloc ioas failed, ret: %d\n", ret);
-	goto close_fd_exit;
-    }
-
-    container = g_malloc0(sizeof(*container));
-    container->space = space;
-    container->iommufd = fd;
-    container->ioas = ioas;
-    container->error = NULL;
-    container->dirty_pages_supported = false;
-    container->dma_max_mappings = 0;
-    QLIST_INIT(&container->giommu_list);
-    QLIST_INIT(&container->hostwin_list);
-    QLIST_INIT(&container->vrdl_list);
-    container->iommu_type = VFIO_TYPE1v2_IOMMU;
-
-    ret = vfio_ram_block_discard_disable(container, true);
-    if (ret) {
-        error_setg_errno(errp, -ret, "Cannot set discarding of RAM broken");
-        goto free_container_exit;
-    }
-
-    /* Assume 4k IOVA page size */
-    iova_pgsizes = 4096;
-    vfio_host_win_add(container, 0, (hwaddr)-1, iova_pgsizes);
-    container->pgsizes = iova_pgsizes;
-
-    /* The default in the kernel ("dma_entry_limit") is 65535. */
-    container->dma_max_mappings = 65535;
-
-//    vfio_kvm_device_add_group(group);
-
-    QLIST_INIT(&container->group_list);
-    QLIST_INSERT_HEAD(&space->containers, container, next);
-
-    group->container = container;
-    QLIST_INSERT_HEAD(&container->group_list, group, container_next);
-
-    container->listener = vfio_device_memory_listener;
-
-    memory_listener_register(&container->listener, container->space->as);
-
-    if (container->error) {
-        ret = -1;
-        error_propagate_prepend(errp, container->error,
-            "memory listener initialization failed: ");
-        goto listener_release_exit;
-    }
-
-    container->initialized = true;
-
-    return 0;
-listener_release_exit:
-    QLIST_REMOVE(group, container_next);
-    QLIST_REMOVE(container, next);
-//    vfio_kvm_device_del_group(group);
-    vfio_listener_release(container);
-
-    vfio_ram_block_discard_disable(container, false);
-
-free_container_exit:
-    g_free(container);
-    iommufd_free_ioas(fd, ioas);
-
-close_fd_exit:
-    close(fd);
-
-    vfio_put_address_space(space);
-
-    return ret;
-}
-
-static void vfio_disconnect_container(VFIOGroup *group)
-{
-    VFIOContainer *container = group->container;
-
-    QLIST_REMOVE(group, container_next);
-    group->container = NULL;
-
-    /*
-     * Explicitly release the listener first before unset container,
-     * since unset may destroy the backend container if it's the last
-     * group.
-     */
-    if (QLIST_EMPTY(&container->group_list)) {
-        vfio_listener_release(container);
-    }
-
-    if (QLIST_EMPTY(&container->group_list)) {
-        VFIOAddressSpace *space = container->space;
-        VFIOGuestIOMMU *giommu, *tmp;
-
-        QLIST_REMOVE(container, next);
-
-        QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
-            memory_region_unregister_iommu_notifier(
-                    MEMORY_REGION(giommu->iommu), &giommu->n);
-            QLIST_REMOVE(giommu, giommu_next);
-            g_free(giommu);
-        }
-
-//        trace_vfio_disconnect_container(container->fd);
-	iommufd_free_ioas(container->fd, container->ioas);
-        close(container->fd);
-        g_free(container);
-
-        vfio_put_address_space(space);
-    }
-}
-
-VFIOGroup *vfio_device_get_group(int groupid, AddressSpace *as, Error **errp)
-{
-    VFIOGroup *group;
-
-    QLIST_FOREACH(group, &vfio_group_list, next) {
-        if (group->groupid == groupid) {
-            /* Found it.  Now is it already in the right context? */
-            if (group->container->space->as == as) {
-                return group;
-            } else {
-                error_setg(errp, "group %d used in multiple address spaces",
-                           group->groupid);
-                return NULL;
-            }
-        }
-    }
-
-    group = g_malloc0(sizeof(*group));
-
-    group->groupid = groupid;
-    QLIST_INIT(&group->device_list);
-
-    if (vfio_connect_container(group, as, errp)) {
-        error_prepend(errp, "failed to setup container for group %d: ",
-                      groupid);
-        goto free_group_exit;
-    }
-
-    if (QLIST_EMPTY(&vfio_group_list)) {
-        qemu_register_reset(vfio_reset_handler, NULL);
-    }
-
-    QLIST_INSERT_HEAD(&vfio_group_list, group, next);
-
-    return group;
-
-free_group_exit:
-    g_free(group);
-
-    return NULL;
-}
-
-void vfio_device_put_group(VFIOGroup *group)
-{
-    if (!group || !QLIST_EMPTY(&group->device_list)) {
-        return;
-    }
-
-    if (!group->ram_block_discard_allowed) {
-        vfio_ram_block_discard_disable(group->container, false);
-    }
-//    vfio_kvm_device_del_group(group);
-    vfio_disconnect_container(group);
-    QLIST_REMOVE(group, next);
-    g_free(group);
-
-    if (QLIST_EMPTY(&vfio_group_list)) {
-        qemu_unregister_reset(vfio_reset_handler, NULL);
-    }
-}
-
 static int vfio_get_devicefd(const char *sysfs_path, Error **errp)
 {
     int vfio_id = -1, ret = 0;
@@ -1066,39 +782,358 @@ out:
     return ret;
 }
 
-int vfio_device_get(VFIOGroup *group, const char *sysfs_path,
-                    VFIODevice *vbasedev, Error **errp)
+static int vfio_device_bind_iommufd(VFIODevice *vbasedev, int iommufd)
+{
+    struct vfio_device_bind_iommufd bind;
+    int ret;
+
+    bind.argsz = sizeof(bind);
+    bind.flags = 0;
+    bind.iommufd = iommufd;
+    bind.dev_cookie = (uint64_t)vbasedev;
+
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_BIND_IOMMUFD, &bind);
+    if (ret) {
+        printf("error bind failed, rt: %d\n", ret);
+    } else {
+        vbasedev->devid = bind.out_devid;
+        printf("bind succ for devicefd: %d, devid: %u\n", vbasedev->fd, bind.out_devid);
+    }
+
+    return ret;
+}
+
+static int vfio_device_attach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
+{
+	struct vfio_device_attach_ioaspt attach_data;
+	int ret;
+
+	attach_data.argsz = sizeof(attach_data);
+	attach_data.flags = 0;
+	attach_data.iommufd = iommufd;
+	attach_data.ioaspt_id = ioas;
+
+	printf("attach ioas: %u - 1\n", ioas);
+	ret = ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOASPT, &attach_data);
+	printf("attach ioas: %u - 2, ret: %d, hwpt_id: %u\n", ioas, ret, attach_data.out_hwpt_id);
+	if (ret) {
+		printf("error attach ioas failed, rt: %d\n", ret);
+	}
+	return ret;
+}
+
+static void vfio_device_detach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
+{
+	struct vfio_device_detach_ioaspt detach_data;
+	int ret;
+
+	detach_data.argsz = sizeof(detach_data);
+	detach_data.flags = 0;
+	detach_data.iommufd = iommufd;
+	detach_data.ioaspt_id = ioas;
+
+	printf("detach ioas: %d - 1\n", ioas);
+	ret = ioctl(vbasedev->fd, VFIO_DEVICE_DETACH_IOASPT, &detach_data);
+	printf("detach ioas: %d - 2, ret: %d\n", ioas, ret);
+}
+
+static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
+                                         AddressSpace *as, Error **errp)
+{
+    VFIOContainer *container;
+    int ret, fd;
+    uint32_t ioas, iova_pgsizes;
+    VFIOAddressSpace *space;
+
+    space = vfio_get_address_space(as);
+
+    /*
+     * VFIO is currently incompatible with discarding of RAM insofar as the
+     * madvise to purge (zap) the page from QEMU's address space does not
+     * interact with the memory API and therefore leaves stale virtual to
+     * physical mappings in the IOMMU if the page was previously pinned.  We
+     * therefore set discarding broken for each group added to a container,
+     * whether the container is used individually or shared.  This provides
+     * us with options to allow devices within a group to opt-in and allow
+     * discarding, so long as it is done consistently for a group (for instance
+     * if the device is an mdev device where it is known that the host vendor
+     * driver will never pin pages outside of the working set of the guest
+     * driver, which would thus not be discarding candidates).
+     *
+     * The first opportunity to induce pinning occurs here where we attempt to
+     * attach the group to existing containers within the AddressSpace.  If any
+     * pages are already zapped from the virtual address space, such as from
+     * previous discards, new pinning will cause valid mappings to be
+     * re-established.  Likewise, when the overall MemoryListener for a new
+     * container is registered, a replay of mappings within the AddressSpace
+     * will occur, re-establishing any previously zapped pages as well.
+     *
+     * Especially virtio-balloon is currently only prevented from discarding
+     * new memory, it will not yet set ram_block_discard_set_required() and
+     * therefore, neither stops us here or deals with the sudden memory
+     * consumption of inflated memory.
+     *
+     * We do support discarding of memory coordinated via the RamDiscardManager
+     * with some IOMMU types. vfio_ram_block_discard_disable() handles the
+     * details once we know which type of IOMMU we are using.
+     */
+
+    QLIST_FOREACH(container, &space->containers, next) {
+        ret = vfio_ram_block_discard_disable(container, true);
+        if (ret) {
+            error_setg_errno(errp, -ret,
+                             "Cannot set discarding of RAM broken");
+            return ret;
+        }
+        group->container = container;
+        QLIST_INSERT_HEAD(&container->group_list, group, container_next);
+//        vfio_kvm_device_add_group(group);
+        return 0;
+    }
+
+    fd = iommufd_open();
+
+    ret = iommufd_alloc_ioas(fd, &ioas);
+    if (ret < 0) {
+        error_setg_errno(errp, errno, "error alloc ioas");
+	goto close_fd_exit;
+    }
+
+    ret = vfio_device_bind_iommufd(vbasedev, fd);
+    if (ret) {
+        error_setg_errno(errp, errno, "error bind iommufd");
+        goto free_ioas_exit;
+    }
+
+    ret = vfio_device_attach_ioas(vbasedev, fd, ioas);
+    if (ret) {
+        error_setg_errno(errp, errno, "error attach ioas");
+        goto free_ioas_exit;
+    }
+
+    container = g_malloc0(sizeof(*container));
+    container->space = space;
+    container->iommufd = fd;
+    container->ioas = ioas;
+    container->error = NULL;
+    container->dirty_pages_supported = false;
+    container->dma_max_mappings = 0;
+    QLIST_INIT(&container->giommu_list);
+    QLIST_INIT(&container->hostwin_list);
+    QLIST_INIT(&container->vrdl_list);
+    container->iommu_type = VFIO_TYPE1v2_IOMMU;
+
+    ret = vfio_ram_block_discard_disable(container, true);
+    if (ret) {
+        error_setg_errno(errp, -ret, "Cannot set discarding of RAM broken");
+        goto free_container_exit;
+    }
+
+    /* Assume 4k IOVA page size */
+    iova_pgsizes = 4096;
+    vfio_host_win_add(container, 0, (hwaddr)-1, iova_pgsizes);
+    container->pgsizes = iova_pgsizes;
+
+    /* The default in the kernel ("dma_entry_limit") is 65535. */
+    container->dma_max_mappings = 65535;
+
+//    vfio_kvm_device_add_group(group);
+
+    QLIST_INIT(&container->group_list);
+    QLIST_INSERT_HEAD(&space->containers, container, next);
+
+    group->container = container;
+    QLIST_INSERT_HEAD(&container->group_list, group, container_next);
+
+    container->listener = vfio_device_memory_listener;
+
+    memory_listener_register(&container->listener, container->space->as);
+
+    if (container->error) {
+        ret = -1;
+        error_propagate_prepend(errp, container->error,
+            "memory listener initialization failed: ");
+        goto listener_release_exit;
+    }
+
+    container->initialized = true;
+
+    return 0;
+listener_release_exit:
+    QLIST_REMOVE(group, container_next);
+    QLIST_REMOVE(container, next);
+//    vfio_kvm_device_del_group(group);
+    vfio_listener_release(container);
+
+    vfio_ram_block_discard_disable(container, false);
+
+free_container_exit:
+    g_free(container);
+    vfio_device_detach_ioas(vbasedev, fd, ioas);
+
+free_ioas_exit:
+    iommufd_free_ioas(fd, ioas);
+
+close_fd_exit:
+    close(fd);
+
+    vfio_put_address_space(space);
+
+    return ret;
+}
+
+static void vfio_disconnect_container(VFIOGroup *group)
+{
+    VFIOContainer *container = group->container;
+
+    QLIST_REMOVE(group, container_next);
+    group->container = NULL;
+
+    /*
+     * Explicitly release the listener first before unset container,
+     * since unset may destroy the backend container if it's the last
+     * group.
+     */
+    if (QLIST_EMPTY(&container->group_list)) {
+        vfio_listener_release(container);
+    }
+
+    if (QLIST_EMPTY(&container->group_list)) {
+        VFIOAddressSpace *space = container->space;
+        VFIOGuestIOMMU *giommu, *tmp;
+
+        QLIST_REMOVE(container, next);
+
+        QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
+            memory_region_unregister_iommu_notifier(
+                    MEMORY_REGION(giommu->iommu), &giommu->n);
+            QLIST_REMOVE(giommu, giommu_next);
+            g_free(giommu);
+        }
+
+//        trace_vfio_disconnect_container(container->fd);
+	iommufd_free_ioas(container->fd, container->ioas);
+        close(container->fd);
+        g_free(container);
+
+        vfio_put_address_space(space);
+    }
+}
+
+static bool vfio_group_find_device(VFIOGroup *group, VFIODevice *vbasedev)
+{
+    VFIODevice *vbasedev_iter;
+
+    QLIST_FOREACH(vbasedev_iter, &group->device_list, next) {
+        if (strcmp(vbasedev_iter->name, vbasedev->name) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static VFIOGroup * vfio_device_get_group(VFIODevice *vbasedev, int groupid, AddressSpace *as, Error **errp)
+{
+    VFIOGroup *group;
+
+    QLIST_FOREACH(group, &vfio_group_list, next) {
+        if (group->groupid == groupid) {
+            /* Found it.  Now is it already in the right context? */
+            if (group->container->space->as == as) {
+                return group;
+            } else {
+                error_setg(errp, "group %d used in multiple address spaces",
+                           group->groupid);
+                return NULL;
+            }
+        }
+    }
+
+    group = g_malloc0(sizeof(*group));
+
+    group->groupid = groupid;
+    QLIST_INIT(&group->device_list);
+
+    if (vfio_device_connect_container(vbasedev, group, as, errp)) {
+        error_prepend(errp, "failed to setup container for group %d: ",
+                      groupid);
+        goto free_group_exit;
+    }
+
+    if (QLIST_EMPTY(&vfio_group_list)) {
+        qemu_register_reset(vfio_reset_handler, NULL);
+    }
+
+    QLIST_INSERT_HEAD(&vfio_group_list, group, next);
+
+    return group;
+
+free_group_exit:
+    g_free(group);
+
+    return NULL;
+}
+
+static void __vfio_put_group(VFIOGroup *group)
+{
+    if (!group || !QLIST_EMPTY(&group->device_list)) {
+        return;
+    }
+
+    if (!group->ram_block_discard_allowed) {
+        vfio_ram_block_discard_disable(group->container, false);
+    }
+//    vfio_kvm_device_del_group(group);
+    vfio_disconnect_container(group);
+    QLIST_REMOVE(group, next);
+    g_free(group);
+
+    if (QLIST_EMPTY(&vfio_group_list)) {
+        qemu_unregister_reset(vfio_reset_handler, NULL);
+    }
+}
+
+static void vfio_device_put_group(VFIODevice *vbasedev, VFIOGroup *group)
+{
+    vfio_device_detach_ioas(vbasedev, group->container->iommufd, group->container->ioas);
+    __vfio_put_group(group);
+}
+
+int vfio_device_get(VFIODevice *vbasedev, int groupid, AddressSpace *as, Error **errp)
 {
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
+    VFIOGroup *group;
     int ret, fd;
 
-    fd = vfio_get_devicefd(sysfs_path, errp);
+    fd = vfio_get_devicefd(vbasedev->sysfsdev, errp);
     if (fd < 0) {
         printf("%s no direct device open\n", __func__);
-        return fd;
+        return -1;
     }
 
     vbasedev->fd = fd;
-    ret = vfio_device_bind_iommufd(vbasedev, group->container->iommufd);
-    if (ret) {
-        error_setg_errno(errp, errno, "error bind iommufd");
+
+    group = vfio_device_get_group(vbasedev, groupid, as, errp);
+    if (!group) {
+        error_setg_errno(errp, errno, "error connect as");
         vbasedev->fd = 0;
         close(fd);
-        return ret;
+        return -1;
     }
 
-    ret = vfio_device_attach_ioas(vbasedev, group->container->iommufd, group->container->ioas);
-    if (ret) {
-        error_setg_errno(errp, errno, "error attach ioas");
+    if (vfio_group_find_device(group, vbasedev)) {
+        error_setg_errno(errp, errno, "error already attached device");
+        vfio_device_put_group(vbasedev, group);
         vbasedev->fd = 0;
         close(fd);
-        return ret;
+        return -1;
     }
 
     ret = ioctl(fd, VFIO_DEVICE_GET_INFO, &dev_info);
     if (ret) {
         error_setg_errno(errp, errno, "error getting device info");
-        vfio_device_detach_ioas(vbasedev, group->container->iommufd, group->container->ioas);
+        vfio_device_put_group(vbasedev, group);
         vbasedev->fd = 0;
         close(fd);
         return ret;
@@ -1115,7 +1150,7 @@ int vfio_device_get(VFIOGroup *group, const char *sysfs_path,
         if (!QLIST_EMPTY(&group->device_list)) {
             error_setg(errp, "Inconsistent setting of support for discarding "
                        "RAM (e.g., balloon) within group");
-            vfio_device_detach_ioas(vbasedev, group->container->iommufd, group->container->ioas);
+            vfio_device_put_group(vbasedev, group);
             vbasedev->fd = 0;
             close(fd);
             return -1;
@@ -1127,7 +1162,6 @@ int vfio_device_get(VFIOGroup *group, const char *sysfs_path,
         }
     }
 
-    vbasedev->fd = fd;
     vbasedev->group = group;
     QLIST_INSERT_HEAD(&group->device_list, vbasedev, next);
 
@@ -1144,12 +1178,16 @@ int vfio_device_get(VFIOGroup *group, const char *sysfs_path,
 
 void vfio_device_put_base(VFIODevice *vbasedev)
 {
-    if (!vbasedev->group) {
+    VFIOGroup *group = vbasedev->group;
+
+    if (!group) {
         return;
     }
-    QLIST_REMOVE(vbasedev, next);
-    vfio_device_detach_ioas(vbasedev, vbasedev->group->container->iommufd, vbasedev->group->container->ioas);
-    vbasedev->fd = 0;
+
     vbasedev->group = NULL;
+    QLIST_REMOVE(vbasedev, next);
+    vfio_device_put_group(vbasedev, group);
     close(vbasedev->fd);
+    vbasedev->fd = 0;
 }
+

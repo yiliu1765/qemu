@@ -221,11 +221,8 @@ typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
 extern VFIOGroupList vfio_group_list;
 
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
-VFIOGroup *vfio_device_get_group(int groupid, AddressSpace *as, Error **errp);
-void vfio_device_put_group(VFIOGroup *group);
-int vfio_device_get(VFIOGroup *group, const char *sysfs_path,
-                    VFIODevice *vbasedev, Error **errp);
 void vfio_device_put_base(VFIODevice *vbasedev);
+int vfio_device_get(VFIODevice *vbasedev, int groupid, AddressSpace *as, Error **errp);
 
 bool vfio_mig_active(void);
 int64_t vfio_mig_bytes_transferred(void);
