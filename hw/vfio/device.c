@@ -837,6 +837,25 @@ static void vfio_device_detach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t 
 	printf("detach ioas: %d - 2, ret: %d\n", ioas, ret);
 }
 
+static int vfio_device_attach_address_space(VFIODevice *vbasedev, int fd,
+                                            uint32_t ioas, Error **errp)
+{
+    int ret;
+
+    ret = vfio_device_bind_iommufd(vbasedev, fd);
+    if (ret) {
+        error_setg_errno(errp, errno, "error bind iommufd");
+        return ret;
+    }
+
+    ret = vfio_device_attach_ioas(vbasedev, fd, ioas);
+    if (ret) {
+        error_setg_errno(errp, errno, "error attach ioas");
+    }
+
+    return ret;
+}
+
 static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
                                          AddressSpace *as, Error **errp)
 {
@@ -879,19 +898,22 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
      */
 
     QLIST_FOREACH(container, &space->containers, next) {
-        ret = vfio_ram_block_discard_disable(container, true);
-        if (ret) {
-            error_setg_errno(errp, -ret,
-                             "Cannot set discarding of RAM broken");
-            return ret;
+        if (!vfio_device_attach_address_space(vbasedev, container->iommufd, container->ioas, errp)) {
+            ret = vfio_ram_block_discard_disable(container, true);
+            if (ret) {
+                vfio_device_detach_ioas(vbasedev, container->iommufd, container->ioas);
+                error_setg_errno(errp, -ret,
+                                 "Cannot set discarding of RAM broken");
+                return ret;
+            }
+            group->container = container;
+            QLIST_INSERT_HEAD(&container->group_list, group, container_next);
+//          vfio_kvm_device_add_group(group);
+            return 0;
         }
-        group->container = container;
-        QLIST_INSERT_HEAD(&container->group_list, group, container_next);
-//        vfio_kvm_device_add_group(group);
-        return 0;
     }
 
-    fd = iommufd_open();
+    fd = iommufd_get();
 
     ret = iommufd_alloc_ioas(fd, &ioas);
     if (ret < 0) {
@@ -899,15 +921,8 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
 	goto close_fd_exit;
     }
 
-    ret = vfio_device_bind_iommufd(vbasedev, fd);
+    ret = vfio_device_attach_address_space(vbasedev, fd, ioas, errp);
     if (ret) {
-        error_setg_errno(errp, errno, "error bind iommufd");
-        goto free_ioas_exit;
-    }
-
-    ret = vfio_device_attach_ioas(vbasedev, fd, ioas);
-    if (ret) {
-        error_setg_errno(errp, errno, "error attach ioas");
         goto free_ioas_exit;
     }
 
@@ -975,7 +990,7 @@ free_ioas_exit:
     iommufd_free_ioas(fd, ioas);
 
 close_fd_exit:
-    close(fd);
+    iommufd_put(fd);
 
     vfio_put_address_space(space);
 

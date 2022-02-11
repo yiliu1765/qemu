@@ -29,8 +29,8 @@
 #include "exec/cpu-common.h"
 #include <linux/iommufd.h>
 
-int iommufd_open(void);
-void iommufd_close(int fd);
+int iommufd_get(void);
+void iommufd_put(int fd);
 int iommufd_alloc_ioas(int fd, uint32_t *ioas);
 void iommufd_free_ioas(int fd, uint32_t ioas);
 int iommufd_unmap_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size);

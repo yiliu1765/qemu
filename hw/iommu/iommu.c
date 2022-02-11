@@ -26,20 +26,29 @@
 #include "qemu/error-report.h"
 #include "hw/iommu/iommu.h"
 
-int iommufd_open(void)
-{
-    int fd;
+int iommufd_users = 0;
+int iommufd = -1;
 
-    fd = qemu_open_old("/dev/iommu", O_RDWR);
-    if (fd < 0) {
-        error_report("Failed to open /dev/iommu!\n");
+int iommufd_get(void)
+{
+    if (iommufd == -1) {
+        iommufd = qemu_open_old("/dev/iommu", O_RDWR);
+        if (iommufd < 0) {
+            error_report("Failed to open /dev/iommu!\n");
+        } else {
+            iommufd_users = 1;
+        }
+    } else {
+        iommufd_users++;
     }
-    return fd;
+    return iommufd;
 }
 
-void iommufd_close(int fd)
+void iommufd_put(int fd)
 {
-
+    if (--iommufd_users) {
+        return;
+    }
     close(fd);
 }
 
@@ -92,7 +101,6 @@ int iommufd_unmap_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size)
     unmap.iova = iova;
     unmap.length = size;
 
-    printf("unmap\n");
     ret = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_UNMAP, &unmap);
     if (ret) {
         error_report("IOMMU_IOAS_PAGETABLE_UNMAP failed: %s", strerror(errno));
@@ -117,7 +125,6 @@ int iommufd_map_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size, vo
         map.flags |= IOMMU_IOAS_PAGETABLE_MAP_WRITEABLE;
     }
 
-    printf("map\n");
     ret = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_MAP, &map);
     if (ret) {
         error_report("IOMMU_IOAS_PAGETABLE_MAP failed: %s", strerror(errno));
@@ -459,7 +466,7 @@ int test_iommufd(void)
     uint32_t ioas;
     char *device_path;
 
-    iommufd = iommufd_open();
+    iommufd = iommufd_get();
     if (iommufd < 0) {
         printf("%s iommufd open error\n", __func__);
 	return -ENODEV;
@@ -513,7 +520,7 @@ out_free:
     g_free(device_path);
     iommufd_free_ioas(iommufd, ioas);
 out_close_fd:
-    iommufd_close(iommufd);
+    iommufd_put(iommufd);
 
     return rt;
 }
