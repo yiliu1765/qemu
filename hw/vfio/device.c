@@ -728,7 +728,7 @@ static int vfio_get_devicefd(const char *sysfs_path, Error **errp)
     dir = opendir(path);
     if (!dir) {
         ret = -ENOTTY;
-	goto out;
+        goto out;
     }
 
     while ((dent = readdir(dir))) {
@@ -771,7 +771,7 @@ static int vfio_get_devicefd(const char *sysfs_path, Error **errp)
     vfio_devt = makedev(major, minor);
     printf("vfio_devt: %lu, %lu\n", vfio_devt, st.st_rdev);
     if (st.st_rdev != vfio_devt) {
-	ret = -EINVAL;
+        ret = -EINVAL;
     } else {
         ret = qemu_open_old(tmp, O_RDWR);
     }
@@ -805,36 +805,36 @@ static int vfio_device_bind_iommufd(VFIODevice *vbasedev, int iommufd)
 
 static int vfio_device_attach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
 {
-	struct vfio_device_attach_ioaspt attach_data;
-	int ret;
+    struct vfio_device_attach_ioaspt attach_data;
+    int ret;
 
-	attach_data.argsz = sizeof(attach_data);
-	attach_data.flags = 0;
-	attach_data.iommufd = iommufd;
-	attach_data.ioaspt_id = ioas;
+    attach_data.argsz = sizeof(attach_data);
+    attach_data.flags = 0;
+    attach_data.iommufd = iommufd;
+    attach_data.ioaspt_id = ioas;
 
-	printf("attach ioas: %u - 1\n", ioas);
-	ret = ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOASPT, &attach_data);
-	printf("attach ioas: %u - 2, ret: %d, hwpt_id: %u\n", ioas, ret, attach_data.out_hwpt_id);
-	if (ret) {
-		printf("error attach ioas failed, rt: %d\n", ret);
-	}
-	return ret;
+    printf("attach ioas: %u - 1\n", ioas);
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOASPT, &attach_data);
+    printf("attach ioas: %u - 2, ret: %d, hwpt_id: %u\n", ioas, ret, attach_data.out_hwpt_id);
+    if (ret) {
+        printf("error attach ioas failed, rt: %d\n", ret);
+    }
+    return ret;
 }
 
 static void vfio_device_detach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
 {
-	struct vfio_device_detach_ioaspt detach_data;
-	int ret;
+    struct vfio_device_detach_ioaspt detach_data;
+    int ret;
 
-	detach_data.argsz = sizeof(detach_data);
-	detach_data.flags = 0;
-	detach_data.iommufd = iommufd;
-	detach_data.ioaspt_id = ioas;
+    detach_data.argsz = sizeof(detach_data);
+    detach_data.flags = 0;
+    detach_data.iommufd = iommufd;
+    detach_data.ioaspt_id = ioas;
 
-	printf("detach ioas: %d - 1\n", ioas);
-	ret = ioctl(vbasedev->fd, VFIO_DEVICE_DETACH_IOASPT, &detach_data);
-	printf("detach ioas: %d - 2, ret: %d\n", ioas, ret);
+    printf("detach ioas: %d - 1\n", ioas);
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_DETACH_IOASPT, &detach_data);
+    printf("detach ioas: %d - 2, ret: %d\n", ioas, ret);
 }
 
 static int vfio_device_attach_address_space(VFIODevice *vbasedev, int fd,
@@ -918,7 +918,7 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
     ret = iommufd_alloc_ioas(fd, &ioas);
     if (ret < 0) {
         error_setg_errno(errp, errno, "error alloc ioas");
-	goto close_fd_exit;
+        goto close_fd_exit;
     }
 
     ret = vfio_device_attach_address_space(vbasedev, fd, ioas, errp);
@@ -1027,7 +1027,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
         }
 
 //        trace_vfio_disconnect_container(container->fd);
-	iommufd_free_ioas(container->fd, container->ioas);
+        iommufd_free_ioas(container->fd, container->ioas);
         close(container->fd);
         g_free(container);
 
