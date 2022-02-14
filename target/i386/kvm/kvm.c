@@ -1919,8 +1919,8 @@ int kvm_arch_init_vcpu(CPUState *cs)
          * The allocated storage must be large enough for all of the
          * possible XSAVE state components.
          */
-        assert(kvm_arch_get_supported_cpuid(kvm_state, 0xd, 0, R_ECX)
-               <= env->xsave_buf_len);
+//        assert(kvm_arch_get_supported_cpuid(kvm_state, 0xd, 0, R_ECX)
+//               <= env->xsave_buf_len);
     }
 
     max_nested_state_len = kvm_max_nested_state_length();
