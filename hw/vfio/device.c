@@ -1027,8 +1027,8 @@ static void vfio_disconnect_container(VFIOGroup *group)
         }
 
 //        trace_vfio_disconnect_container(container->fd);
-        iommufd_free_ioas(container->fd, container->ioas);
-        close(container->fd);
+        iommufd_free_ioas(container->iommufd, container->ioas);
+        iommufd_put(container->iommufd);
         g_free(container);
 
         vfio_put_address_space(space);
@@ -1056,7 +1056,13 @@ static VFIOGroup * vfio_device_get_group(VFIODevice *vbasedev, int groupid, Addr
         if (group->groupid == groupid) {
             /* Found it.  Now is it already in the right context? */
             if (group->container->space->as == as) {
-                return group;
+                if (!vfio_device_attach_address_space(vbasedev, group->container->iommufd, group->container->ioas, errp)) {
+                    return group;
+                } else {
+                    error_setg(errp, "failed to attach device in group %d to its alias address spaces",
+                               group->groupid);
+                    return NULL;
+                }
             } else {
                 error_setg(errp, "group %d used in multiple address spaces",
                            group->groupid);
@@ -1131,7 +1137,7 @@ int vfio_device_get(VFIODevice *vbasedev, int groupid, AddressSpace *as, Error *
 
     group = vfio_device_get_group(vbasedev, groupid, as, errp);
     if (!group) {
-        error_setg_errno(errp, errno, "error connect as");
+        error_prepend(errp, "error connect as");
         vbasedev->fd = 0;
         close(fd);
         return -1;

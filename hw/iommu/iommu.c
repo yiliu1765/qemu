@@ -49,6 +49,7 @@ void iommufd_put(int fd)
     if (--iommufd_users) {
         return;
     }
+    iommufd = -1;
     close(fd);
 }
 
