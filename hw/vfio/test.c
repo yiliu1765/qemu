@@ -368,6 +368,7 @@ out:
 	return rt;
 }
 
+#ifdef CONFIG_VFIO_MUL_DEV_GROUP_TEST
 static void test_multi_device_group(int iommufd)
 {
 	uint32_t ioas;
@@ -405,6 +406,7 @@ static void test_multi_device_group(int iommufd)
 	printf("try to free ioas: %d\n", ioas);
 	iommufd_free_ioas(iommufd, ioas);
 }
+#endif
 
 static uint64_t device_cookie_count = 1;
 /*
@@ -470,10 +472,12 @@ int test_iommufd(void)
         }
 
     }
-
+#ifdef CONFIG_VFIO_MUL_DEV_GROUP_TEST
     printf("^^^^^^^^^^^^^^^^^ Test multi device group start ^^^^^^^^^^^^^^^^^\n");
     test_multi_device_group(iommufd);
     printf("^^^^^^^^^^^^^^^^^ Test multi device group end ^^^^^^^^^^^^^^^^^\n");
+#endif
+
 out_free:
     g_free(device_path);
     iommufd_free_ioas(iommufd, ioas);

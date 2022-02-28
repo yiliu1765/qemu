@@ -41,3 +41,8 @@ config VFIO_IGD
     bool
     default y if PC_PCI
     depends on VFIO_PCI
+
+config VFIO_MUL_DEV_GROUP_TEST
+    bool
+    default n
+    depends on LINUX && PCI
