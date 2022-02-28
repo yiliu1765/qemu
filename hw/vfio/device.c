@@ -382,7 +382,7 @@ static void vfio_unregister_ram_discard_listener(VFIOContainer *container,
     g_free(vrdl);
 }
 
-static void vfio_device_listener_region_add(MemoryListener *listener,
+static void vfio_listener_region_add(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
@@ -395,7 +395,7 @@ static void vfio_device_listener_region_add(MemoryListener *listener,
     Error *err = NULL;
 
     if (vfio_listener_skipped_section(section)) {
-//        trace_vfio_device_listener_region_add_skip(
+//        trace_vfio_listener_region_add_skip(
 //                section->offset_within_address_space,
 //                section->offset_within_address_space +
 //                int128_get64(int128_sub(section->size, int128_one())));
@@ -440,7 +440,7 @@ static void vfio_device_listener_region_add(MemoryListener *listener,
         IOMMUMemoryRegion *iommu_mr = IOMMU_MEMORY_REGION(section->mr);
         int iommu_idx;
 
-//        trace_vfio_device_listener_region_add_iommu(iova, end);
+//        trace_vfio_listener_region_add_iommu(iova, end);
         /*
          * FIXME: For VFIO iommu types which have KVM acceleration to
          * avoid bouncing all map/unmaps through qemu this way, this
@@ -499,7 +499,7 @@ static void vfio_device_listener_region_add(MemoryListener *listener,
             section->offset_within_region +
             (iova - section->offset_within_address_space);
 
-//    trace_vfio_device_listener_region_add_ram(iova, end, vaddr);
+//    trace_vfio_listener_region_add_ram(iova, end, vaddr);
 
     llsize = int128_sub(llend, int128_make64(iova));
 
@@ -507,7 +507,7 @@ static void vfio_device_listener_region_add(MemoryListener *listener,
         hwaddr pgmask = (1ULL << ctz64(hostwin->iova_pgsizes)) - 1;
 
         if ((iova & pgmask) || (int128_get64(llsize) & pgmask)) {
-//            trace_vfio_device_listener_region_add_no_dma_map(
+//            trace_vfio_listener_region_add_no_dma_map(
 //                memory_region_name(section->mr),
 //                section->offset_within_address_space,
 //                int128_getlo(section->size),
@@ -556,7 +556,7 @@ fail:
     }
 }
 
-static void vfio_device_listener_region_del(MemoryListener *listener,
+static void vfio_listener_region_del(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
@@ -566,7 +566,7 @@ static void vfio_device_listener_region_del(MemoryListener *listener,
     bool try_unmap = true;
 
     if (vfio_listener_skipped_section(section)) {
-//        trace_vfio_device_listener_region_del_skip(
+//        trace_vfio_listener_region_del_skip(
 //                section->offset_within_address_space,
 //                section->offset_within_address_space +
 //                int128_get64(int128_sub(section->size, int128_one())));
@@ -615,7 +615,7 @@ static void vfio_device_listener_region_del(MemoryListener *listener,
 
     llsize = int128_sub(llend, int128_make64(iova));
 
-//    trace_vfio_device_listener_region_del(iova, end);
+//    trace_vfio_listener_region_del(iova, end);
 
     if (memory_region_is_ram_device(section->mr)) {
         hwaddr pgmask;
@@ -661,9 +661,9 @@ static void vfio_device_listener_region_del(MemoryListener *listener,
     memory_region_unref(section->mr);
 }
 
-static const MemoryListener vfio_device_memory_listener = {
-    .region_add = vfio_device_listener_region_add,
-    .region_del = vfio_device_listener_region_del,
+static const MemoryListener vfio_memory_listener = {
+    .region_add = vfio_listener_region_add,
+    .region_del = vfio_listener_region_del,
 };
 
 static void vfio_listener_release(VFIOContainer *container)
@@ -960,7 +960,7 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
 
-    container->listener = vfio_device_memory_listener;
+    container->listener = vfio_memory_listener;
 
     memory_listener_register(&container->listener, container->space->as);
 
@@ -1121,11 +1121,17 @@ static void vfio_device_put_group(VFIODevice *vbasedev, VFIOGroup *group)
     __vfio_put_group(group);
 }
 
+int test_iommufd(void);
+
 int vfio_device_get(VFIODevice *vbasedev, int groupid, AddressSpace *as, Error **errp)
 {
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
     VFIOGroup *group;
     int ret, fd;
+
+    printf("################### Test START #################\n");
+    test_iommufd();
+    printf("################### Test END #################\n\nn");
 
     fd = vfio_get_devicefd(vbasedev->sysfsdev, errp);
     if (fd < 0) {
@@ -1212,3 +1218,4 @@ void vfio_device_put_base(VFIODevice *vbasedev)
     vbasedev->fd = 0;
 }
 
+#include "test.c"
