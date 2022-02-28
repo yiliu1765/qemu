@@ -396,6 +396,7 @@ static void test_multi_device_group(int iommufd)
 
 	for (j = 0; j < idx; j++) {
 		if (j == 3) {
+			printf("Skip %s detach and close, a failure will be expected when try to free ioas: %u\n", device_paths[j], ioas);
 			continue;
 		}
 		printf("detach ioas: %d, on %s, fd: %d, and then close devicefd\n", ioas, device_paths[j], sdf[j]);
