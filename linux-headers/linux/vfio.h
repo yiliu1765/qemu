@@ -226,10 +226,10 @@ struct vfio_device_bind_iommufd {
 #define VFIO_DEVICE_BIND_IOMMUFD	_IO(VFIO_TYPE, VFIO_BASE + 19)
 
 /*
- * VFIO_DEVICE_ATTACH_IOASPT - _IOW(VFIO_TYPE, VFIO_BASE + 21,
- *				struct vfio_device_attach_ioaspt)
+ * VFIO_DEVICE_ATTACH_IOAS - _IOW(VFIO_TYPE, VFIO_BASE + 21,
+ *				  struct vfio_device_attach_ioas)
  *
- * Attach a vfio device to the specified IOAS Page Table.
+ * Attach a vfio device to the specified IOAS.
  *
  * Multiple vfio devices can be attached to the same IOAS Page Table. One
  * device can be attached to only one ioas at this point.
@@ -237,42 +237,42 @@ struct vfio_device_bind_iommufd {
  * @argsz:	user filled size of this data.
  * @flags:	reserved for future extension.
  * @iommufd:	iommufd where the ioas comes from.
- * @ioaspt_id:	Input the target I/O address space page table.
+ * @ioas_id:	Input the target I/O address space page table.
  * @hwpt_id:	Output the hw page table id
  *
  * Return: 0 on success, -errno on failure.
  */
-struct vfio_device_attach_ioaspt {
+struct vfio_device_attach_ioas {
 	__u32	argsz;
 	__u32	flags;
 	__s32	iommufd;
-	__u32	ioaspt_id;
+	__u32	ioas_id;
 	__u32	out_hwpt_id;
 };
 
-#define VFIO_DEVICE_ATTACH_IOASPT	_IO(VFIO_TYPE, VFIO_BASE + 20)
+#define VFIO_DEVICE_ATTACH_IOAS	_IO(VFIO_TYPE, VFIO_BASE + 20)
 
 /*
- * VFIO_DEVICE_DETACH_IOASPT - _IOW(VFIO_TYPE, VFIO_BASE + 21,
- *				struct vfio_device_detach_ioaspt)
+ * VFIO_DEVICE_DETACH_IOAS - _IOW(VFIO_TYPE, VFIO_BASE + 21,
+ *				  struct vfio_device_detach_ioas)
  *
- * Detach a vfio device to the specified IOAS Page Table.
+ * Detach a vfio device from the specified IOAS.
  *
  * @argsz:	user filled size of this data.
  * @flags:	reserved for future extension.
  * @iommufd:	iommufd where the ioas comes from.
- * @ioaspt_id:	Input the target I/O address space page table.
+ * @ioas_id:	Input the target I/O address space page table.
  *
  * Return: 0 on success, -errno on failure.
  */
-struct vfio_device_detach_ioaspt {
+struct vfio_device_detach_ioas {
 	__u32	argsz;
 	__u32	flags;
 	__s32	iommufd;
-	__u32	ioaspt_id;
+	__u32	ioas_id;
 };
 
-#define VFIO_DEVICE_DETACH_IOASPT	_IO(VFIO_TYPE, VFIO_BASE + 21)
+#define VFIO_DEVICE_DETACH_IOAS	_IO(VFIO_TYPE, VFIO_BASE + 21)
 
 /**
  * VFIO_DEVICE_GET_INFO - _IOR(VFIO_TYPE, VFIO_BASE + 7,

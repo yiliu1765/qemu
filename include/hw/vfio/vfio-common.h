@@ -80,7 +80,7 @@ typedef struct VFIOContainer {
     VFIOAddressSpace *space;
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
     int iommufd;
-    uint64_t ioas;
+    uint32_t ioas_id;
     MemoryListener listener;
     MemoryListener prereg_listener;
     unsigned iommu_type;

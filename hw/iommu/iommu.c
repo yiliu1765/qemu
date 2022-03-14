@@ -57,7 +57,7 @@ void iommufd_put(int fd)
 
 int iommufd_alloc_ioas(int fd, uint32_t *ioas)
 {
-    struct iommu_ioas_pagetable_alloc alloc_data;
+    struct iommu_ioas_alloc alloc_data;
     int ret;
 
     if (fd < 0) {
@@ -67,7 +67,7 @@ int iommufd_alloc_ioas(int fd, uint32_t *ioas)
     alloc_data.size = sizeof(alloc_data);
     alloc_data.flags = 0;
 
-    ret = ioctl(fd, IOMMU_IOAS_PAGETABLE_ALLOC, &alloc_data);
+    ret = ioctl(fd, IOMMU_IOAS_ALLOC, &alloc_data);
     if (ret < 0) {
         error_report("Failed to allocate ioas  %m\n");
     }
@@ -95,7 +95,7 @@ void iommufd_free_ioas(int fd, uint32_t ioas)
 
 int iommufd_unmap_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size)
 {
-    struct iommu_ioas_pagetable_unmap unmap;
+    struct iommu_ioas_unmap unmap;
     int ret;
 
     memset(&unmap, 0x0, sizeof(unmap));
@@ -104,33 +104,33 @@ int iommufd_unmap_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size)
     unmap.iova = iova;
     unmap.length = size;
 
-    ret = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_UNMAP, &unmap);
+    ret = ioctl(iommufd, IOMMU_IOAS_UNMAP, &unmap);
     if (ret) {
-        error_report("IOMMU_IOAS_PAGETABLE_UNMAP failed: %s", strerror(errno));
+        error_report("IOMMU_IOAS_UNMAP failed: %s", strerror(errno));
     }
     return ret;
 }
 
 int iommufd_map_dma(int iommufd, uint32_t ioas, hwaddr iova, ram_addr_t size, void *vaddr, bool readonly)
 {
-    struct iommu_ioas_pagetable_map map;
+    struct iommu_ioas_map map;
     int ret;
 
     memset(&map, 0x0, sizeof(map));
     map.size = sizeof(map);
-    map.flags = IOMMU_IOAS_PAGETABLE_MAP_READABLE |
-                IOMMU_IOAS_PAGETABLE_MAP_FIXED_IOVA;
+    map.flags = IOMMU_IOAS_MAP_READABLE |
+                IOMMU_IOAS_MAP_FIXED_IOVA;
     map.ioas_id = ioas;
     map.user_va = (int64_t)vaddr;
     map.iova = iova;
     map.length = size;
     if (!readonly) {
-        map.flags |= IOMMU_IOAS_PAGETABLE_MAP_WRITEABLE;
+        map.flags |= IOMMU_IOAS_MAP_WRITEABLE;
     }
 
-    ret = ioctl(iommufd, IOMMU_IOAS_PAGETABLE_MAP, &map);
+    ret = ioctl(iommufd, IOMMU_IOAS_MAP, &map);
     if (ret) {
-        error_report("IOMMU_IOAS_PAGETABLE_MAP failed: %s", strerror(errno));
+        error_report("IOMMU_IOAS_MAP failed: %s", strerror(errno));
     }
     return ret;
 }

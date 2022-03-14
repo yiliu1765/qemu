@@ -49,13 +49,13 @@ static int vfio_dma_unmap(VFIOContainer *container,
                           hwaddr iova, ram_addr_t size,
                           IOMMUTLBEntry *iotlb)
 {
-    return iommufd_unmap_dma(container->iommufd, container->ioas, iova, size);
+    return iommufd_unmap_dma(container->iommufd, container->ioas_id, iova, size);
 }
 
 static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
-    return iommufd_map_dma(container->iommufd, container->ioas, iova, size, vaddr, readonly);
+    return iommufd_map_dma(container->iommufd, container->ioas_id, iova, size, vaddr, readonly);
 }
 
 static void vfio_host_win_add(VFIOContainer *container,
@@ -803,42 +803,42 @@ static int vfio_device_bind_iommufd(VFIODevice *vbasedev, int iommufd)
     return ret;
 }
 
-static int vfio_device_attach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
+static int vfio_device_attach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas_id)
 {
-    struct vfio_device_attach_ioaspt attach_data;
+    struct vfio_device_attach_ioas attach_data;
     int ret;
 
     attach_data.argsz = sizeof(attach_data);
     attach_data.flags = 0;
     attach_data.iommufd = iommufd;
-    attach_data.ioaspt_id = ioas;
+    attach_data.ioas_id = ioas_id;
 
-    printf("attach ioas: %u - 1\n", ioas);
-    ret = ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOASPT, &attach_data);
-    printf("attach ioas: %u - 2, ret: %d, hwpt_id: %u\n", ioas, ret, attach_data.out_hwpt_id);
+    printf("attach ioas: %u - 1\n", ioas_id);
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOAS, &attach_data);
+    printf("attach ioas: %u - 2, ret: %d, hwpt_id: %u\n", ioas_id, ret, attach_data.out_hwpt_id);
     if (ret) {
         printf("error attach ioas failed, rt: %d\n", ret);
     }
     return ret;
 }
 
-static void vfio_device_detach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas)
+static void vfio_device_detach_ioas(VFIODevice *vbasedev, int iommufd, uint32_t ioas_id)
 {
-    struct vfio_device_detach_ioaspt detach_data;
+    struct vfio_device_detach_ioas detach_data;
     int ret;
 
     detach_data.argsz = sizeof(detach_data);
     detach_data.flags = 0;
     detach_data.iommufd = iommufd;
-    detach_data.ioaspt_id = ioas;
+    detach_data.ioas_id = ioas_id;
 
-    printf("detach ioas: %d - 1\n", ioas);
-    ret = ioctl(vbasedev->fd, VFIO_DEVICE_DETACH_IOASPT, &detach_data);
-    printf("detach ioas: %d - 2, ret: %d\n", ioas, ret);
+    printf("detach ioas: %d - 1\n", ioas_id);
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_DETACH_IOAS, &detach_data);
+    printf("detach ioas: %d - 2, ret: %d\n", ioas_id, ret);
 }
 
 static int vfio_device_attach_address_space(VFIODevice *vbasedev, int fd,
-                                            uint32_t ioas, Error **errp)
+                                            uint32_t ioas_id, Error **errp)
 {
     int ret;
 
@@ -848,7 +848,7 @@ static int vfio_device_attach_address_space(VFIODevice *vbasedev, int fd,
         return ret;
     }
 
-    ret = vfio_device_attach_ioas(vbasedev, fd, ioas);
+    ret = vfio_device_attach_ioas(vbasedev, fd, ioas_id);
     if (ret) {
         error_setg_errno(errp, errno, "error attach ioas");
     }
@@ -861,7 +861,7 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
 {
     VFIOContainer *container;
     int ret, fd;
-    uint32_t ioas, iova_pgsizes;
+    uint32_t ioas_id, iova_pgsizes;
     VFIOAddressSpace *space;
 
     space = vfio_get_address_space(as);
@@ -898,10 +898,10 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
      */
 
     QLIST_FOREACH(container, &space->containers, next) {
-        if (!vfio_device_attach_address_space(vbasedev, container->iommufd, container->ioas, errp)) {
+        if (!vfio_device_attach_address_space(vbasedev, container->iommufd, container->ioas_id, errp)) {
             ret = vfio_ram_block_discard_disable(container, true);
             if (ret) {
-                vfio_device_detach_ioas(vbasedev, container->iommufd, container->ioas);
+                vfio_device_detach_ioas(vbasedev, container->iommufd, container->ioas_id);
                 error_setg_errno(errp, -ret,
                                  "Cannot set discarding of RAM broken");
                 return ret;
@@ -915,13 +915,13 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
 
     fd = iommufd_get();
 
-    ret = iommufd_alloc_ioas(fd, &ioas);
+    ret = iommufd_alloc_ioas(fd, &ioas_id);
     if (ret < 0) {
         error_setg_errno(errp, errno, "error alloc ioas");
         goto close_fd_exit;
     }
 
-    ret = vfio_device_attach_address_space(vbasedev, fd, ioas, errp);
+    ret = vfio_device_attach_address_space(vbasedev, fd, ioas_id, errp);
     if (ret) {
         goto free_ioas_exit;
     }
@@ -929,7 +929,7 @@ static int vfio_device_connect_container(VFIODevice *vbasedev, VFIOGroup *group,
     container = g_malloc0(sizeof(*container));
     container->space = space;
     container->iommufd = fd;
-    container->ioas = ioas;
+    container->ioas_id = ioas_id;
     container->error = NULL;
     container->dirty_pages_supported = false;
     container->dma_max_mappings = 0;
@@ -984,10 +984,10 @@ listener_release_exit:
 
 free_container_exit:
     g_free(container);
-    vfio_device_detach_ioas(vbasedev, fd, ioas);
+    vfio_device_detach_ioas(vbasedev, fd, ioas_id);
 
 free_ioas_exit:
-    iommufd_free_ioas(fd, ioas);
+    iommufd_free_ioas(fd, ioas_id);
 
 close_fd_exit:
     iommufd_put(fd);
@@ -1027,7 +1027,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
         }
 
 //        trace_vfio_disconnect_container(container->fd);
-        iommufd_free_ioas(container->iommufd, container->ioas);
+        iommufd_free_ioas(container->iommufd, container->ioas_id);
         iommufd_put(container->iommufd);
         g_free(container);
 
@@ -1056,7 +1056,7 @@ static VFIOGroup * vfio_device_get_group(VFIODevice *vbasedev, int groupid, Addr
         if (group->groupid == groupid) {
             /* Found it.  Now is it already in the right context? */
             if (group->container->space->as == as) {
-                if (!vfio_device_attach_address_space(vbasedev, group->container->iommufd, group->container->ioas, errp)) {
+                if (!vfio_device_attach_address_space(vbasedev, group->container->iommufd, group->container->ioas_id, errp)) {
                     return group;
                 } else {
                     error_setg(errp, "failed to attach device in group %d to its alias address spaces",
@@ -1117,7 +1117,7 @@ static void __vfio_put_group(VFIOGroup *group)
 
 static void vfio_device_put_group(VFIODevice *vbasedev, VFIOGroup *group)
 {
-    vfio_device_detach_ioas(vbasedev, group->container->iommufd, group->container->ioas);
+    vfio_device_detach_ioas(vbasedev, group->container->iommufd, group->container->ioas_id);
     __vfio_put_group(group);
 }
 
@@ -1131,7 +1131,7 @@ int vfio_device_get(VFIODevice *vbasedev, int groupid, AddressSpace *as, Error *
 
     printf("################### Test START #################\n");
     test_iommufd();
-    printf("################### Test END #################\n\nn");
+    printf("################### Test END #################\n\n");
 
     fd = vfio_get_devicefd(vbasedev->sysfsdev, errp);
     if (fd < 0) {
