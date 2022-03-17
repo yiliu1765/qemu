@@ -30,6 +30,7 @@
 #include <linux/vfio.h>
 #endif
 #include "sysemu/sysemu.h"
+#include "hw/iommu/iommu.h"
 
 #define VFIO_MSG_PREFIX "vfio %s: "
 
@@ -146,6 +147,7 @@ typedef struct VFIODevice {
     VFIOMigration *migration;
     Error *migration_blocker;
     OnOffAuto pre_copy_dirty_page_tracking;
+    IOMMUDevice idev;
 } VFIODevice;
 
 struct VFIODeviceOps {
@@ -161,6 +163,7 @@ typedef struct VFIOGroup {
     int fd;
     int groupid;
     VFIOContainer *container;
+    IOMMUContainer *iommu_container;
     QLIST_HEAD(, VFIODevice) device_list;
     QLIST_ENTRY(VFIOGroup) next;
     QLIST_ENTRY(VFIOGroup) container_next;
