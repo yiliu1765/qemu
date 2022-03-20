@@ -39,7 +39,7 @@
 #include "sysemu/runstate.h"
 #include "trace.h"
 #include "qapi/error.h"
-#include "migration/migration.h"
+#include "hw/iommufd/iommufd.h"
 
 static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
     QLIST_HEAD_INITIALIZER(vfio_address_spaces);
@@ -112,6 +112,11 @@ static int vfio_dma_unmap(VFIOContainer *container,
         .size = size,
     };
 
+    if (container->iommu_type == VFIO_IOMMUFD) {
+        return iommufd_unmap_dma(container->iommufd,
+                                 container->ioas_id, iova, size);
+    }
+
     if (iotlb && container->dirty_pages_supported &&
         vfio_devices_all_running_and_saving(container)) {
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
@@ -153,6 +158,11 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
         .iova = iova,
         .size = size,
     };
+
+    if (container->iommu_type == VFIO_IOMMUFD) {
+        return iommufd_map_dma(container->iommufd, container->ioas_id,
+                               iova, size, vaddr, readonly);
+    }
 
     if (!readonly) {
         map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
@@ -878,12 +888,22 @@ static void vfio_listener_log_global_start(MemoryListener *listener)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
 
+    if (container->iommu_type == VFIO_IOMMUFD) {
+        printf("%s Not supported by iommufd yet!\n", __func__);
+        return;
+    }
+
     vfio_set_dirty_page_tracking(container, true);
 }
 
 static void vfio_listener_log_global_stop(MemoryListener *listener)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+
+    if (container->iommu_type == VFIO_IOMMUFD) {
+        printf("%s Not supported by iommufd yet!\n", __func__);
+        return;
+    }
 
     vfio_set_dirty_page_tracking(container, false);
 }
@@ -1068,6 +1088,11 @@ static void vfio_listener_log_sync(MemoryListener *listener,
         MemoryRegionSection *section)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+
+    if (container->iommu_type == VFIO_IOMMUFD) {
+        printf("%s Not supported by iommufd yet!\n", __func__);
+        return;
+    }
 
     if (vfio_listener_skipped_section(section) ||
         !container->dirty_pages_supported) {

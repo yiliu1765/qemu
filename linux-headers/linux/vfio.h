@@ -53,6 +53,13 @@
 #define VFIO_UPDATE_VADDR		10
 
 /*
+ * FIXME:
+ * Maybe it's not suitable to define it here as VFIO has no way to tell userspace
+ * it supports it or not.
+ * */
+#define VFIO_IOMMUFD			11
+
+/*
  * The IOCTL interface is designed for extensibility by embedding the
  * structure length (argsz) and flags into structures passed between
  * kernel and userspace.  We therefore use the _IO() macro for these

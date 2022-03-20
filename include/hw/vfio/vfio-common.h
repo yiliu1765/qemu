@@ -78,9 +78,17 @@ typedef struct VFIOAddressSpace {
 
 struct VFIOGroup;
 
+typedef struct VFIOIOASHwpt {
+    uint32_t hwpt_id;
+    QLIST_HEAD(, VFIODevice) device_list;
+    QLIST_ENTRY(VFIOIOASHwpt) next;
+} VFIOIOASHwpt;
+
 typedef struct VFIOContainer {
     VFIOAddressSpace *space;
-    int fd; /* /dev/vfio/vfio, empowered by the attached groups */
+    int fd; /* /dev/vfio/vfio, empowered by the attached non-dummy groups */
+    int iommufd;
+    uint32_t ioas_id;
     MemoryListener listener;
     MemoryListener prereg_listener;
     unsigned iommu_type;
@@ -95,6 +103,7 @@ typedef struct VFIOContainer {
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
     QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
+    QLIST_HEAD(, VFIOIOASHwpt) hwpt_list;
     QLIST_ENTRY(VFIOContainer) next;
 } VFIOContainer;
 
@@ -127,6 +136,7 @@ typedef struct VFIODeviceOps VFIODeviceOps;
 
 typedef struct VFIODevice {
     QLIST_ENTRY(VFIODevice) next;
+    QLIST_ENTRY(VFIODevice) hwpt_next;
     struct VFIOGroup *group;
     char *sysfsdev;
     char *name;
@@ -145,6 +155,7 @@ typedef struct VFIODevice {
     VFIOMigration *migration;
     Error *migration_blocker;
     OnOffAuto pre_copy_dirty_page_tracking;
+    uint32_t devid;
 } VFIODevice;
 
 struct VFIODeviceOps {
@@ -164,6 +175,7 @@ typedef struct VFIOGroup {
     QLIST_ENTRY(VFIOGroup) next;
     QLIST_ENTRY(VFIOGroup) container_next;
     bool ram_block_discard_allowed;
+    bool dummy;
 } VFIOGroup;
 
 typedef struct VFIODMABuf {
@@ -224,6 +236,19 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp);
 void vfio_put_group(VFIOGroup *group);
 int vfio_group_get_device(VFIOGroup *group, const char *name,
                           VFIODevice *vbasedev, Error **errp);
+
+void vfio_device_put(VFIODevice *vbasedev);
+int vfio_device_get(VFIODevice *vbasedev, int groupid, AddressSpace *as,
+                    Error **errp);
+int vfio_device_attach_container(VFIODevice *vbasedev,
+                                 VFIOContainer *container, Error **errp);
+void vfio_device_detach_container(VFIODevice *vbasedev,
+                                  VFIOContainer *container);
+VFIOGroup *vfio_find_group(int groupid, AddressSpace *as, Error **errp);
+VFIOGroup *vfio_device_get_group(VFIODevice *vbasedev, int groupid,
+                                 AddressSpace *as, Error **errp);
+void vfio_device_put_group(VFIODevice *vbasedev, VFIOGroup *group);
+bool vfio_group_find_device(VFIOGroup *group, VFIODevice *vbasedev);
 
 extern const MemoryRegionOps vfio_region_ops;
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;

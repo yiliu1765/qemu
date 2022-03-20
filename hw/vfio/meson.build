@@ -3,6 +3,7 @@ vfio_ss.add(files(
   'common.c',
   'group.c',
   'as.c',
+  'device.c',
   'spapr.c',
   'migration.c',
 ))

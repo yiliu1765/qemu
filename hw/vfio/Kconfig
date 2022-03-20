@@ -1,6 +1,7 @@
 config VFIO
     bool
     depends on LINUX
+    select IOMMUFD
 
 config VFIO_PCI
     bool
