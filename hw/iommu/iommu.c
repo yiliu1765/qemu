@@ -1001,7 +1001,7 @@ int iommu_register_device(IOMMUDevice *idev, AddressSpace *as,
 //        qemu_register_reset(iommu_reset_handler, NULL);
 //    }
 
-    QLIST_INSERT_HEAD(&iommu_device_list, device, next);
+    QLIST_INSERT_HEAD(&iommu_device_list, idev, next);
 
     return 0;
 }
