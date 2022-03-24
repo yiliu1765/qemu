@@ -606,12 +606,12 @@ static void vfio_ccw_get_device(VFIOGroup *group, VFIOCCWDevice *vcdev,
      * discarding of memory in RAM blocks, ie. pages pinned in the host are
      * in the current working set of the guest driver and therefore never
      * overlap e.g., with pages available to the guest balloon driver.  This
-     * needs to be set before vfio_get_device() for vfio common to handle
+     * needs to be set before vfio_group_get_device() for vfio common to handle
      * ram_block_discard_disable().
      */
     vcdev->vdev.ram_block_discard_allowed = true;
 
-    if (vfio_get_device(group, vcdev->cdev.mdevid, &vcdev->vdev, errp)) {
+    if (vfio_group_get_device(group, vcdev->cdev.mdevid, &vcdev->vdev, errp)) {
         goto out_err;
     }
 

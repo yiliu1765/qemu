@@ -2892,7 +2892,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         goto error;
     }
 
-    ret = vfio_get_device(group, vdev->vbasedev.name, &vdev->vbasedev, errp);
+    ret = vfio_group_get_device(group, vdev->vbasedev.name, &vdev->vbasedev, errp);
     if (ret) {
         vfio_put_group(group);
         goto error;

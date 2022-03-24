@@ -589,7 +589,7 @@ static int vfio_base_device_init(VFIODevice *vbasedev, Error **errp)
             return -EBUSY;
         }
     }
-    ret = vfio_get_device(group, vbasedev->name, vbasedev, errp);
+    ret = vfio_group_get_device(group, vbasedev->name, vbasedev, errp);
     if (ret) {
         vfio_put_group(group);
         return ret;

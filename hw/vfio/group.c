@@ -753,8 +753,8 @@ void vfio_put_group(VFIOGroup *group)
     }
 }
 
-int vfio_get_device(VFIOGroup *group, const char *name,
-                    VFIODevice *vbasedev, Error **errp)
+int vfio_group_get_device(VFIOGroup *group, const char *name,
+                          VFIODevice *vbasedev, Error **errp)
 {
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
     int ret, fd;
@@ -805,8 +805,8 @@ int vfio_get_device(VFIOGroup *group, const char *name,
     vbasedev->num_regions = dev_info.num_regions;
     vbasedev->flags = dev_info.flags;
 
-    trace_vfio_get_device(name, dev_info.flags, dev_info.num_regions,
-                          dev_info.num_irqs);
+    trace_vfio_group_get_device(name, dev_info.flags, dev_info.num_regions,
+                                dev_info.num_irqs);
 
     vbasedev->reset_works = !!(dev_info.flags & VFIO_DEVICE_FLAGS_RESET);
     return 0;
