@@ -856,7 +856,7 @@ int64_t vfio_mig_bytes_transferred(void)
 
 int vfio_migration_probe(VFIODevice *vbasedev, Error **errp)
 {
-    VFIOContainer *container = vbasedev->group->container;
+    VFIOContainer *container = &vbasedev->group->container->obj;
     struct vfio_region_info *info = NULL;
     int ret = -ENOTSUP;
 

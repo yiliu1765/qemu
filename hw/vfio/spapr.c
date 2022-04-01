@@ -39,8 +39,8 @@ static void *vfio_prereg_gpa_to_vaddr(MemoryRegionSection *section, hwaddr gpa)
 static void vfio_prereg_listener_region_add(MemoryListener *listener,
                                             MemoryRegionSection *section)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer,
-                                            prereg_listener);
+    VFIOLegacyContainer *container = container_of(listener, VFIOLegacyContainer,
+                                                  prereg_listener);
     const hwaddr gpa = section->offset_within_address_space;
     hwaddr end;
     int ret;
@@ -83,9 +83,9 @@ static void vfio_prereg_listener_region_add(MemoryListener *listener,
          * can gracefully fail.  Runtime, there's not much we can do other
          * than throw a hardware error.
          */
-        if (!container->initialized) {
-            if (!container->error) {
-                error_setg_errno(&container->error, -ret,
+        if (!container->obj.initialized) {
+            if (!container->obj.error) {
+                error_setg_errno(&container->obj.error, -ret,
                                  "Memory registering failed");
             }
         } else {
@@ -97,8 +97,8 @@ static void vfio_prereg_listener_region_add(MemoryListener *listener,
 static void vfio_prereg_listener_region_del(MemoryListener *listener,
                                             MemoryRegionSection *section)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer,
-                                            prereg_listener);
+    VFIOLegacyContainer *container = container_of(listener, VFIOLegacyContainer,
+                                                  prereg_listener);
     const hwaddr gpa = section->offset_within_address_space;
     hwaddr end;
     int ret;
@@ -141,7 +141,7 @@ const MemoryListener vfio_prereg_listener = {
     .region_del = vfio_prereg_listener_region_del,
 };
 
-int vfio_spapr_create_window(VFIOContainer *container,
+int vfio_spapr_create_window(VFIOContainer *cobj,
                              MemoryRegionSection *section,
                              hwaddr *pgsize)
 {
@@ -151,6 +151,7 @@ int vfio_spapr_create_window(VFIOContainer *container,
     unsigned entries, bits_total, bits_per_level, max_levels;
     struct vfio_iommu_spapr_tce_create create = { .argsz = sizeof(create) };
     long rampagesize = qemu_minrampagesize();
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
 
     /*
      * The host might not support the guest supported IOMMU page size,
@@ -159,13 +160,13 @@ int vfio_spapr_create_window(VFIOContainer *container,
     if (pagesize > rampagesize) {
         pagesize = rampagesize;
     }
-    pgmask = container->pgsizes & (pagesize | (pagesize - 1));
+    pgmask = cobj->pgsizes & (pagesize | (pagesize - 1));
     pagesize = pgmask ? (1ULL << (63 - clz64(pgmask))) : 0;
     if (!pagesize) {
         error_report("Host doesn't support page size 0x%"PRIx64
                      ", the supported mask is 0x%lx",
                      memory_region_iommu_get_min_page_size(iommu_mr),
-                     container->pgsizes);
+                     cobj->pgsizes);
         return -EINVAL;
     }
 
@@ -217,7 +218,7 @@ int vfio_spapr_create_window(VFIOContainer *container,
     }
 
     if (create.start_addr != section->offset_within_address_space) {
-        vfio_spapr_remove_window(container, create.start_addr);
+        vfio_spapr_remove_window(cobj, create.start_addr);
 
         error_report("Host doesn't support DMA window at %"HWADDR_PRIx", must be %"PRIx64,
                      section->offset_within_address_space,
@@ -233,13 +234,14 @@ int vfio_spapr_create_window(VFIOContainer *container,
     return 0;
 }
 
-int vfio_spapr_remove_window(VFIOContainer *container,
+int vfio_spapr_remove_window(VFIOContainer *cobj,
                              hwaddr offset_within_address_space)
 {
     struct vfio_iommu_spapr_tce_remove remove = {
         .argsz = sizeof(remove),
         .start_addr = offset_within_address_space,
     };
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
     int ret;
 
     ret = ioctl(container->fd, VFIO_IOMMU_SPAPR_TCE_REMOVE, &remove);

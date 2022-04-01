@@ -30,6 +30,7 @@
 #include <linux/vfio.h>
 #endif
 #include "sysemu/sysemu.h"
+#include "qom/object.h"
 //#include "hw/vfio/vfio-iommu-backend.h"
 
 #define VFIO_MSG_PREFIX "vfio %s: "
@@ -71,6 +72,8 @@ typedef struct VFIOMigration {
     uint64_t pending_bytes;
 } VFIOMigration;
 
+typedef struct VFIOContainer VFIOContainer;
+
 typedef struct VFIOAddressSpace {
     AddressSpace *as;
     QLIST_HEAD(, VFIOContainer) containers;
@@ -78,27 +81,6 @@ typedef struct VFIOAddressSpace {
 } VFIOAddressSpace;
 
 struct VFIOGroup;
-
-typedef struct VFIOContainer {
-    VFIOAddressSpace *space;
-    int fd; /* /dev/vfio/vfio, empowered by the attached groups */
-    MemoryListener listener;
-    MemoryListener prereg_listener;
-    unsigned iommu_type;
-    const struct VFIOIOMMUOps *iommu_ops;
-    Error *error;
-    bool initialized;
-    bool dirty_pages_supported;
-    uint64_t dirty_pgsizes;
-    uint64_t max_dirty_bitmap_size;
-    unsigned long pgsizes;
-    unsigned int dma_max_mappings;
-    QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
-    QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
-    QLIST_HEAD(, VFIOGroup) group_list;
-    QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
-    QLIST_ENTRY(VFIOContainer) next;
-} VFIOContainer;
 
 typedef struct VFIOGuestIOMMU {
     VFIOContainer *container;
@@ -159,10 +141,10 @@ struct VFIODeviceOps {
     int (*vfio_load_config)(VFIODevice *vdev, QEMUFile *f);
 };
 
-typedef int (*vfio_iommu_dma_map)(VFIOContainer *container,
+typedef int (*vfio_iommu_dma_map)(VFIOContainer *cobj,
                                   hwaddr iova, ram_addr_t size,
                                   void *vaddr, bool readonly);
-typedef int (*vfio_iommu_dma_unmap)(VFIOContainer *container,
+typedef int (*vfio_iommu_dma_unmap)(VFIOContainer *cobj,
                                     hwaddr iova, ram_addr_t size,
                                     IOMMUTLBEntry *iotlb);
 typedef int (*vfio_iommu_attach_device)(VFIODevice *vbasedev,
@@ -188,10 +170,12 @@ typedef struct VFIOIOMMUOps {
 extern const VFIOIOMMUOps legacy_ops;
 extern const VFIOIOMMUOps iommufd_ops;
 
+struct VFIOLegacyContainer;
+
 typedef struct VFIOGroup {
     int fd;
     int groupid;
-    VFIOContainer *container;
+    struct VFIOLegacyContainer *container;
     QLIST_HEAD(, VFIODevice) device_list;
     QLIST_ENTRY(VFIOGroup) next;
     QLIST_ENTRY(VFIOGroup) container_next;
@@ -224,15 +208,18 @@ typedef struct VFIODisplay {
     } dmabuf;
 } VFIODisplay;
 
-void vfio_host_win_add(VFIOContainer *container,
+void vfio_host_win_add(VFIOContainer *cobj,
                        hwaddr min_iova, hwaddr max_iova,
                        uint64_t iova_pgsizes);
-void vfio_listener_release(VFIOContainer *container);
+int vfio_host_win_del(VFIOContainer *cobj, hwaddr min_iova,
+                      hwaddr max_iova);
+void vfio_container_register_listener(VFIOContainer *cobj, const MemoryListener listener);
+void vfio_container_release_listener(VFIOContainer *cobj);
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
 void vfio_put_address_space(VFIOAddressSpace *space);
-void vfio_spapr_group_attach(VFIOContainer *container, int tablefd);
-bool vfio_devices_all_running_and_saving(VFIOContainer *container);
-bool vfio_devices_all_dirty_tracking(VFIOContainer *container);
+void vfio_spapr_group_attach(VFIOContainer *cobj, int tablefd);
+bool vfio_devices_all_running_and_saving(VFIOContainer *cobj);
+bool vfio_devices_all_dirty_tracking(VFIOContainer *cobj);
 
 void vfio_put_base_device(VFIODevice *vbasedev);
 void vfio_disable_irqindex(VFIODevice *vbasedev, int index);
@@ -275,13 +262,82 @@ vfio_get_device_info_cap(struct vfio_device_info *info, uint16_t id);
 #endif
 extern const MemoryListener vfio_prereg_listener;
 
-int vfio_spapr_create_window(VFIOContainer *container,
+int vfio_spapr_create_window(VFIOContainer *cobj,
                              MemoryRegionSection *section,
                              hwaddr *pgsize);
-int vfio_spapr_remove_window(VFIOContainer *container,
+int vfio_spapr_remove_window(VFIOContainer *cobj,
                              hwaddr offset_within_address_space);
 
 int vfio_migration_probe(VFIODevice *vbasedev, Error **errp);
 void vfio_migration_finalize(VFIODevice *vbasedev);
 
+#define TYPE_VFIO_CONTAINER "qemu:vfio-container-obj"
+#define VFIO_CONTAINER(obj) \
+        OBJECT_CHECK(VFIOContainer, (obj), TYPE_VFIO_CONTAINER)
+#define VFIO_CONTAINER_CLASS(klass) \
+        OBJECT_CLASS_CHECK(VFIOContainerClass, (klass), \
+                         TYPE_VFIO_CONTAINER)
+#define VFIO_CONTAINER_GET_CLASS(obj) \
+        OBJECT_GET_CLASS(VFIOContainerClass, (obj), \
+                         TYPE_VFIO_CONTAINER)
+
+typedef struct VFIOContainerClass {
+    /* private */
+    ObjectClass parent_class;
+
+    int (*dma_map)(VFIOContainer *cobj,
+                              hwaddr iova, ram_addr_t size,
+                              void *vaddr, bool readonly);
+    int (*dma_unmap)(VFIOContainer *cobj,
+                                hwaddr iova, ram_addr_t size,
+                                IOMMUTLBEntry *iotlb);
+    void (*set_dirty_page_tracking)(VFIOContainer *cobj, bool start);
+    int (*get_dirty_bitmap)(VFIOContainer *cobj, uint64_t iova,
+                                 uint64_t size, ram_addr_t ram_addr);
+    bool (*is_spapr)(VFIOContainer *cobj);
+} VFIOContainerClass;
+
+/*
+ * This is an abstraction of host IOMMU with dual-stage capability
+ */
+struct VFIOContainer {
+    Object parent_obj;
+
+    VFIOAddressSpace *space;
+    MemoryListener listener;
+    Error *error;
+    bool initialized;
+    bool dirty_pages_supported;
+    uint64_t dirty_pgsizes;
+    uint64_t max_dirty_bitmap_size;
+    unsigned long pgsizes;
+    unsigned int dma_max_mappings;
+    QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
+    QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
+    QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
+    QLIST_ENTRY(VFIOContainer) next;
+};
+
+typedef struct VFIOLegacyContainer {
+    VFIOContainer obj;
+    int fd; /* /dev/vfio/vfio, empowered by the attached groups */
+    MemoryListener prereg_listener;
+    unsigned iommu_type;
+    QLIST_HEAD(, VFIOGroup) group_list;
+} VFIOLegacyContainer;
+
+int vfio_container_dma_map(VFIOContainer *cobj,
+                           hwaddr iova, ram_addr_t size,
+                           void *vaddr, bool readonly);
+int vfio_container_dma_unmap(VFIOContainer *cobj,
+                             hwaddr iova, ram_addr_t size,
+                             IOMMUTLBEntry *iotlb);
+void vfio_container_set_dirty_page_tracking(VFIOContainer *cobj, bool start);
+int vfio_container_get_dirty_bitmap(VFIOContainer *cobj, uint64_t iova,
+                                    uint64_t size, ram_addr_t ram_addr);
+bool vfio_container_is_spapr(VFIOContainer *cobj);
+void vfio_container_init(void *_container, size_t instance_size,
+                         const char *mrtypename,
+                         VFIOAddressSpace *space);
+void vfio_container_destroy(VFIOContainer *cobj);
 #endif /* HW_VFIO_VFIO_COMMON_H */

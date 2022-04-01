@@ -44,139 +44,6 @@
 static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
     QLIST_HEAD_INITIALIZER(vfio_address_spaces);
 
-#if 0
-
-static int vfio_dma_unmap_bitmap(VFIOContainer *container,
-                                 hwaddr iova, ram_addr_t size,
-                                 IOMMUTLBEntry *iotlb)
-{
-    struct vfio_iommu_type1_dma_unmap *unmap;
-    struct vfio_bitmap *bitmap;
-    uint64_t pages = REAL_HOST_PAGE_ALIGN(size) / qemu_real_host_page_size;
-    int ret;
-
-    unmap = g_malloc0(sizeof(*unmap) + sizeof(*bitmap));
-
-    unmap->argsz = sizeof(*unmap) + sizeof(*bitmap);
-    unmap->iova = iova;
-    unmap->size = size;
-    unmap->flags |= VFIO_DMA_UNMAP_FLAG_GET_DIRTY_BITMAP;
-    bitmap = (struct vfio_bitmap *)&unmap->data;
-
-    /*
-     * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
-     * qemu_real_host_page_size to mark those dirty. Hence set bitmap_pgsize
-     * to qemu_real_host_page_size.
-     */
-
-    bitmap->pgsize = qemu_real_host_page_size;
-    bitmap->size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
-                   BITS_PER_BYTE;
-
-    if (bitmap->size > container->max_dirty_bitmap_size) {
-        error_report("UNMAP: Size of bitmap too big 0x%"PRIx64,
-                     (uint64_t)bitmap->size);
-        ret = -E2BIG;
-        goto unmap_exit;
-    }
-
-    bitmap->data = g_try_malloc0(bitmap->size);
-    if (!bitmap->data) {
-        ret = -ENOMEM;
-        goto unmap_exit;
-    }
-
-    ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
-    if (!ret) {
-        cpu_physical_memory_set_dirty_lebitmap((unsigned long *)bitmap->data,
-                iotlb->translated_addr, pages);
-    } else {
-        error_report("VFIO_UNMAP_DMA with DIRTY_BITMAP : %m");
-    }
-
-    g_free(bitmap->data);
-unmap_exit:
-    g_free(unmap);
-    return ret;
-}
-
-/*
- * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
- */
-int vfio_dma_unmap(VFIOContainer *container,
-                   hwaddr iova, ram_addr_t size,
-                   IOMMUTLBEntry *iotlb)
-{
-    struct vfio_iommu_type1_dma_unmap unmap = {
-        .argsz = sizeof(unmap),
-        .flags = 0,
-        .iova = iova,
-        .size = size,
-    };
-
-    if (iotlb && container->dirty_pages_supported &&
-        vfio_devices_all_running_and_saving(container)) {
-        return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
-    }
-
-    while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
-        /*
-         * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
-         * v4.15) where an overflow in its wrap-around check prevents us from
-         * unmapping the last page of the address space.  Test for the error
-         * condition and re-try the unmap excluding the last page.  The
-         * expectation is that we've never mapped the last page anyway and this
-         * unmap request comes via vIOMMU support which also makes it unlikely
-         * that this page is used.  This bug was introduced well after type1 v2
-         * support was introduced, so we shouldn't need to test for v1.  A fix
-         * is queued for kernel v5.0 so this workaround can be removed once
-         * affected kernels are sufficiently deprecated.
-         */
-        if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
-            container->iommu_type == VFIO_TYPE1v2_IOMMU) {
-            trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->pgsizes);
-            continue;
-        }
-        error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
-        return -errno;
-    }
-
-    return 0;
-}
-
-static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
-                        ram_addr_t size, void *vaddr, bool readonly)
-{
-    struct vfio_iommu_type1_dma_map map = {
-        .argsz = sizeof(map),
-        .flags = VFIO_DMA_MAP_FLAG_READ,
-        .vaddr = (__u64)(uintptr_t)vaddr,
-        .iova = iova,
-        .size = size,
-    };
-
-    if (!readonly) {
-        map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
-    }
-
-    /*
-     * Try the mapping, if it fails with EBUSY, unmap the region and try
-     * again.  This shouldn't be necessary, but we sometimes see it in
-     * the VGA ROM space.
-     */
-    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
-        (errno == EBUSY && vfio_dma_unmap(container, iova, size, NULL) == 0 &&
-         ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
-        return 0;
-    }
-
-    error_report("VFIO_MAP_DMA failed: %s", strerror(errno));
-    return -errno;
-}
-
-#endif
-
 void vfio_host_win_add(VFIOContainer *container,
                        hwaddr min_iova, hwaddr max_iova,
                        uint64_t iova_pgsizes)
@@ -200,8 +67,8 @@ void vfio_host_win_add(VFIOContainer *container,
     QLIST_INSERT_HEAD(&container->hostwin_list, hostwin, hostwin_next);
 }
 
-static int vfio_host_win_del(VFIOContainer *container, hwaddr min_iova,
-                             hwaddr max_iova)
+int vfio_host_win_del(VFIOContainer *container, hwaddr min_iova,
+                      hwaddr max_iova)
 {
     VFIOHostDMAWindow *hostwin;
 
@@ -348,7 +215,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
          * of vaddr will always be there, even if the memory object is
          * destroyed and its backing memory munmap-ed.
          */
-        ret = container->iommu_ops->vfio_iommu_dma_map(container, iova,
+        ret = vfio_container_dma_map(container, iova,
                                                  iotlb->addr_mask + 1, vaddr,
                                                  read_only);
         if (ret) {
@@ -358,7 +225,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
                          iotlb->addr_mask + 1, vaddr, ret);
         }
     } else {
-        ret = container->iommu_ops->vfio_iommu_dma_unmap(container, iova,
+        ret = vfio_container_dma_unmap(container, iova,
 			                           iotlb->addr_mask + 1, iotlb);
         if (ret) {
             error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
@@ -382,7 +249,7 @@ static void vfio_ram_discard_notify_discard(RamDiscardListener *rdl,
     int ret;
 
     /* Unmap with a single call. */
-    ret = container->iommu_ops->vfio_iommu_dma_unmap(container, iova, size , NULL);
+    ret = vfio_container_dma_unmap(container, iova, size , NULL);
     if (ret) {
         error_report("%s: vfio_dma_unmap() failed: %s", __func__,
                      strerror(-ret));
@@ -413,7 +280,7 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
                section->offset_within_address_space;
         vaddr = memory_region_get_ram_ptr(section->mr) + start;
 
-        ret = container->iommu_ops->vfio_iommu_dma_map(container, iova, next - start,
+        ret = vfio_container_dma_map(container, iova, next - start,
                                       vaddr, section->readonly);
         if (ret) {
             /* Rollback */
@@ -565,7 +432,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
     }
     end = int128_get64(int128_sub(llend, int128_one()));
 
-    if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
+    if (vfio_container_is_spapr(container)) {
         hwaddr pgsize = 0;
 
         /* For now intersections are not allowed, we may relax this later */
@@ -704,7 +571,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
         }
     }
 
-    ret = container->iommu_ops->vfio_iommu_dma_map(container, iova, int128_get64(llsize),
+    ret = vfio_container_dma_map(container, iova, int128_get64(llsize),
                        vaddr, section->readonly);
     if (ret) {
         error_setg(&err, "vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
@@ -830,7 +697,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
         if (int128_eq(llsize, int128_2_64())) {
             /* The unmap ioctl doesn't accept a full 64-bit span. */
             llsize = int128_rshift(llsize, 1);
-            ret = container->iommu_ops->vfio_iommu_dma_unmap(container, iova, int128_get64(llsize), NULL);
+            ret = vfio_container_dma_unmap(container, iova, int128_get64(llsize), NULL);
             if (ret) {
                 error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                              "0x%"HWADDR_PRIx") = %d (%m)",
@@ -838,7 +705,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
             }
             iova += int128_get64(llsize);
         }
-        ret = container->iommu_ops->vfio_iommu_dma_unmap(container, iova, int128_get64(llsize), NULL);
+        ret = vfio_container_dma_unmap(container, iova, int128_get64(llsize), NULL);
         if (ret) {
             error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx") = %d (%m)",
@@ -848,7 +715,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
 
     memory_region_unref(section->mr);
 
-    if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
+    if (vfio_container_is_spapr(container)) {
         vfio_spapr_remove_window(container,
                                  section->offset_within_address_space);
         if (vfio_host_win_del(container,
@@ -861,90 +728,18 @@ static void vfio_listener_region_del(MemoryListener *listener,
     }
 }
 
-static void vfio_set_dirty_page_tracking(VFIOContainer *container, bool start)
-{
-    int ret;
-    struct vfio_iommu_type1_dirty_bitmap dirty = {
-        .argsz = sizeof(dirty),
-    };
-
-    if (start) {
-        dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_START;
-    } else {
-        dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP;
-    }
-
-    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, &dirty);
-    if (ret) {
-        error_report("Failed to set dirty tracking flag 0x%x errno: %d",
-                     dirty.flags, errno);
-    }
-}
-
 static void vfio_listener_log_global_start(MemoryListener *listener)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
 
-    vfio_set_dirty_page_tracking(container, true);
+    vfio_container_set_dirty_page_tracking(container, true);
 }
 
 static void vfio_listener_log_global_stop(MemoryListener *listener)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
 
-    vfio_set_dirty_page_tracking(container, false);
-}
-
-static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
-                                 uint64_t size, ram_addr_t ram_addr)
-{
-    struct vfio_iommu_type1_dirty_bitmap *dbitmap;
-    struct vfio_iommu_type1_dirty_bitmap_get *range;
-    uint64_t pages;
-    int ret;
-
-    dbitmap = g_malloc0(sizeof(*dbitmap) + sizeof(*range));
-
-    dbitmap->argsz = sizeof(*dbitmap) + sizeof(*range);
-    dbitmap->flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP;
-    range = (struct vfio_iommu_type1_dirty_bitmap_get *)&dbitmap->data;
-    range->iova = iova;
-    range->size = size;
-
-    /*
-     * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
-     * qemu_real_host_page_size to mark those dirty. Hence set bitmap's pgsize
-     * to qemu_real_host_page_size.
-     */
-    range->bitmap.pgsize = qemu_real_host_page_size;
-
-    pages = REAL_HOST_PAGE_ALIGN(range->size) / qemu_real_host_page_size;
-    range->bitmap.size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
-                                         BITS_PER_BYTE;
-    range->bitmap.data = g_try_malloc0(range->bitmap.size);
-    if (!range->bitmap.data) {
-        ret = -ENOMEM;
-        goto err_out;
-    }
-
-    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, dbitmap);
-    if (ret) {
-        error_report("Failed to get dirty bitmap for iova: 0x%"PRIx64
-                " size: 0x%"PRIx64" err: %d", (uint64_t)range->iova,
-                (uint64_t)range->size, errno);
-        goto err_out;
-    }
-
-    cpu_physical_memory_set_dirty_lebitmap((unsigned long *)range->bitmap.data,
-                                            ram_addr, pages);
-
-    trace_vfio_get_dirty_bitmap(container->fd, range->iova, range->size,
-                                range->bitmap.size, ram_addr);
-err_out:
-    g_free(range->bitmap.data);
-    g_free(dbitmap);
-
-    return ret;
+    vfio_container_set_dirty_page_tracking(container, false);
 }
 
 typedef struct {
@@ -973,7 +768,7 @@ static void vfio_iommu_map_dirty_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     if (vfio_get_xlat_addr(iotlb, NULL, &translated_addr, NULL)) {
         int ret;
 
-        ret = vfio_get_dirty_bitmap(container, iova, iotlb->addr_mask + 1,
+        ret = vfio_container_get_dirty_bitmap(container, iova, iotlb->addr_mask + 1,
                                     translated_addr);
         if (ret) {
             error_report("vfio_iommu_map_dirty_notify(%p, 0x%"HWADDR_PRIx", "
@@ -998,7 +793,7 @@ static int vfio_ram_discard_get_dirty_bitmap(MemoryRegionSection *section,
      * Sync the whole mapped region (spanning multiple individual mappings)
      * in one go.
      */
-    return vfio_get_dirty_bitmap(vrdl->container, iova, size, ram_addr);
+    return vfio_container_get_dirty_bitmap(vrdl->container, iova, size, ram_addr);
 }
 
 static int vfio_sync_ram_discard_listener_dirty_bitmap(VFIOContainer *container,
@@ -1066,7 +861,7 @@ static int vfio_sync_dirty_bitmap(VFIOContainer *container,
     ram_addr = memory_region_get_ram_addr(section->mr) +
                section->offset_within_region;
 
-    return vfio_get_dirty_bitmap(container,
+    return vfio_container_get_dirty_bitmap(container,
                    REAL_HOST_PAGE_ALIGN(section->offset_within_address_space),
                    int128_get64(section->size), ram_addr);
 }
@@ -1094,14 +889,6 @@ const MemoryListener vfio_memory_listener = {
     .log_global_stop = vfio_listener_log_global_stop,
     .log_sync = vfio_listener_log_sync,
 };
-
-void vfio_listener_release(VFIOContainer *container)
-{
-    memory_listener_unregister(&container->listener);
-    if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
-        memory_listener_unregister(&container->prereg_listener);
-    }
-}
 
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
 {

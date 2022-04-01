@@ -54,6 +54,8 @@ static int vfio_kvm_device_fd = -1;
 VFIOGroupList vfio_group_list =
     QLIST_HEAD_INITIALIZER(vfio_group_list);
 
+#define TYPE_VFIO_LEGACY_CONTAINER "qemu:vfio-legacy-container"
+
 /*
  * Device state interfaces
  */
@@ -77,11 +79,12 @@ bool vfio_mig_active(void)
     return true;
 }
 
-bool vfio_devices_all_dirty_tracking(VFIOContainer *container)
+bool vfio_devices_all_dirty_tracking(VFIOContainer *cobj)
 {
     VFIOGroup *group;
     VFIODevice *vbasedev;
     MigrationState *ms = migrate_get_current();
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
 
     if (!migration_is_setup_or_active(ms->state)) {
         return false;
@@ -104,11 +107,12 @@ bool vfio_devices_all_dirty_tracking(VFIOContainer *container)
     return true;
 }
 
-bool vfio_devices_all_running_and_saving(VFIOContainer *container)
+bool vfio_devices_all_running_and_saving(VFIOContainer *cobj)
 {
     VFIOGroup *group;
     VFIODevice *vbasedev;
     MigrationState *ms = migrate_get_current();
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
 
     if (!migration_is_setup_or_active(ms->state)) {
         return false;
@@ -155,10 +159,11 @@ void vfio_reset_handler(void *opaque)
     }
 }
 
-void vfio_spapr_group_attach(VFIOContainer *container, int32_t tablefd)
+void vfio_spapr_group_attach(VFIOContainer *cobj, int32_t tablefd)
 {
 #ifdef CONFIG_KVM
     VFIOGroup *group;
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
     struct kvm_vfio_spapr_tce param = { .tablefd = tablefd, };
     struct kvm_device_attr attr = {
                 .group = KVM_DEV_VFIO_GROUP,
@@ -236,7 +241,7 @@ static void vfio_kvm_device_del_group(VFIOGroup *group)
 /*
  * vfio_get_iommu_type - selects the richest iommu_type (v2 first)
  */
-static int vfio_get_iommu_type(VFIOContainer *container,
+static int vfio_get_iommu_type(VFIOLegacyContainer *container,
                                Error **errp)
 {
     int iommu_types[] = { VFIO_TYPE1v2_IOMMU, VFIO_TYPE1_IOMMU,
@@ -252,7 +257,7 @@ static int vfio_get_iommu_type(VFIOContainer *container,
     return -EINVAL;
 }
 
-static int vfio_init_container(VFIOContainer *container, int group_fd,
+static int vfio_init_legacy_container(VFIOLegacyContainer *container, int group_fd,
                                Error **errp)
 {
     int iommu_type, ret;
@@ -287,7 +292,7 @@ static int vfio_init_container(VFIOContainer *container, int group_fd,
     return 0;
 }
 
-static int vfio_get_iommu_info(VFIOContainer *container,
+static int vfio_get_iommu_info(VFIOLegacyContainer *container,
                                struct vfio_iommu_type1_info **info)
 {
 
@@ -331,11 +336,12 @@ vfio_get_iommu_info_cap(struct vfio_iommu_type1_info *info, uint16_t id)
     return NULL;
 }
 
-static void vfio_get_iommu_info_migration(VFIOContainer *container,
+static void vfio_get_iommu_info_migration(VFIOLegacyContainer *container,
                                          struct vfio_iommu_type1_info *info)
 {
     struct vfio_info_cap_header *hdr;
     struct vfio_iommu_type1_info_cap_migration *cap_mig;
+    VFIOContainer *cobj = &container->obj;
 
     hdr = vfio_get_iommu_info_cap(info, VFIO_IOMMU_TYPE1_INFO_CAP_MIGRATION);
     if (!hdr) {
@@ -350,13 +356,13 @@ static void vfio_get_iommu_info_migration(VFIOContainer *container,
      * qemu_real_host_page_size to mark those dirty.
      */
     if (cap_mig->pgsize_bitmap & qemu_real_host_page_size) {
-        container->dirty_pages_supported = true;
-        container->max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
-        container->dirty_pgsizes = cap_mig->pgsize_bitmap;
+        cobj->dirty_pages_supported = true;
+        cobj->max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
+        cobj->dirty_pgsizes = cap_mig->pgsize_bitmap;
     }
 }
 
-static int vfio_ram_block_discard_disable(VFIOContainer *container, bool state)
+static int vfio_ram_block_discard_disable(VFIOLegacyContainer *container, bool state)
 {
     switch (container->iommu_type) {
     case VFIO_TYPE1v2_IOMMU:
@@ -379,11 +385,22 @@ static int vfio_ram_block_discard_disable(VFIOContainer *container, bool state)
     }
 }
 
-static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
-                                             const VFIOIOMMUOps *iommu_ops,
-                                             Error **errp)
+static void vfio_listener_release(VFIOLegacyContainer *container)
 {
-    VFIOContainer *container;
+    VFIOContainer *cobj = &container->obj;
+
+    vfio_container_release_listener(cobj);
+    if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
+        memory_listener_unregister(&container->prereg_listener);
+    }
+}
+
+static VFIOLegacyContainer *vfio_connect_container(VFIOGroup *group, AddressSpace *as,
+                                                   const VFIOIOMMUOps *iommu_ops,
+                                                   Error **errp)
+{
+    VFIOLegacyContainer *container;
+    VFIOContainer *cobj;
     int ret, fd;
     VFIOAddressSpace *space;
 
@@ -420,7 +437,8 @@ static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
      * details once we know which type of IOMMU we are using.
      */
 
-    QLIST_FOREACH(container, &space->containers, next) {
+    QLIST_FOREACH(cobj, &space->containers, next) {
+        container = container_of(cobj, VFIOLegacyContainer, obj);
         if (!ioctl(group->fd, VFIO_GROUP_SET_CONTAINER, &container->fd)) {
             ret = vfio_ram_block_discard_disable(container, true);
             if (ret) {
@@ -456,17 +474,11 @@ static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     }
 
     container = g_malloc0(sizeof(*container));
-    container->iommu_ops = iommu_ops;
-    container->space = space;
     container->fd = fd;
-    container->error = NULL;
-    container->dirty_pages_supported = false;
-    container->dma_max_mappings = 0;
-    QLIST_INIT(&container->giommu_list);
-    QLIST_INIT(&container->hostwin_list);
-    QLIST_INIT(&container->vrdl_list);
+    vfio_container_init(&container->obj, sizeof(container->obj), TYPE_VFIO_LEGACY_CONTAINER, space);
+    cobj = &container->obj;
 
-    ret = vfio_init_container(container, group->fd, errp);
+    ret = vfio_init_legacy_container(container, group->fd, errp);
     if (ret) {
         goto free_container_exit;
     }
@@ -496,13 +508,13 @@ static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
             /* Assume 4k IOVA page size */
             info->iova_pgsizes = 4096;
         }
-        vfio_host_win_add(container, 0, (hwaddr)-1, info->iova_pgsizes);
-        container->pgsizes = info->iova_pgsizes;
+        vfio_host_win_add(cobj, 0, (hwaddr)-1, info->iova_pgsizes);
+        cobj->pgsizes = info->iova_pgsizes;
 
         /* The default in the kernel ("dma_entry_limit") is 65535. */
-        container->dma_max_mappings = 65535;
+        cobj->dma_max_mappings = 65535;
         if (!ret) {
-            vfio_get_info_dma_avail(info, &container->dma_max_mappings);
+            vfio_get_info_dma_avail(info, &cobj->dma_max_mappings);
             vfio_get_iommu_info_migration(container, info);
         }
         g_free(info);
@@ -531,10 +543,10 @@ static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
 
             memory_listener_register(&container->prereg_listener,
                                      &address_space_memory);
-            if (container->error) {
+            if (cobj->error) {
                 memory_listener_unregister(&container->prereg_listener);
                 ret = -1;
-                error_propagate_prepend(errp, container->error,
+                error_propagate_prepend(errp, cobj->error,
                     "RAM memory listener initialization failed: ");
                 goto enable_discards_exit;
             }
@@ -553,14 +565,14 @@ static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
         }
 
         if (v2) {
-            container->pgsizes = info.ddw.pgsizes;
+            cobj->pgsizes = info.ddw.pgsizes;
             /*
              * There is a default window in just created container.
              * To make region_add/del simpler, we better remove this
              * window now and let those iommu_listener callbacks
              * create/remove them when needed.
              */
-            ret = vfio_spapr_remove_window(container, info.dma32_window_start);
+            ret = vfio_spapr_remove_window(cobj, info.dma32_window_start);
             if (ret) {
                 error_setg_errno(errp, -ret,
                                  "failed to remove existing window");
@@ -568,8 +580,8 @@ static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
             }
         } else {
             /* The default table uses 4K pages */
-            container->pgsizes = 0x1000;
-            vfio_host_win_add(container, info.dma32_window_start,
+            cobj->pgsizes = 0x1000;
+            vfio_host_win_add(cobj, info.dma32_window_start,
                               info.dma32_window_start +
                               info.dma32_window_size - 1,
                               0x1000);
@@ -580,28 +592,26 @@ static VFIOContainer* vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     vfio_kvm_device_add_group(group);
 
     QLIST_INIT(&container->group_list);
-    QLIST_INSERT_HEAD(&space->containers, container, next);
+    QLIST_INSERT_HEAD(&space->containers, cobj, next);
 
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
 
-    container->listener = vfio_memory_listener;
+    vfio_container_register_listener(cobj, vfio_memory_listener);
 
-    memory_listener_register(&container->listener, container->space->as);
-
-    if (container->error) {
+    if (cobj->error) {
         ret = -1;
-        error_propagate_prepend(errp, container->error,
+        error_propagate_prepend(errp, cobj->error,
             "memory listener initialization failed: ");
         goto listener_release_exit;
     }
 
-    container->initialized = true;
+    cobj->initialized = true;
 
     return container;
 listener_release_exit:
     QLIST_REMOVE(group, container_next);
-    QLIST_REMOVE(container, next);
+    QLIST_REMOVE(cobj, next);
     vfio_kvm_device_del_group(group);
     vfio_listener_release(container);
 
@@ -609,6 +619,7 @@ enable_discards_exit:
     vfio_ram_block_discard_disable(container, false);
 
 free_container_exit:
+    vfio_container_destroy(cobj);
     g_free(container);
 
 close_fd_exit:
@@ -622,7 +633,8 @@ put_space_exit:
 
 static void vfio_disconnect_container(VFIOGroup *group)
 {
-    VFIOContainer *container = group->container;
+    VFIOLegacyContainer *container = group->container;
+    VFIOContainer *cobj = &container->obj;
 
     QLIST_REMOVE(group, container_next);
     group->container = NULL;
@@ -642,20 +654,20 @@ static void vfio_disconnect_container(VFIOGroup *group)
     }
 
     if (QLIST_EMPTY(&container->group_list)) {
-        VFIOAddressSpace *space = container->space;
+        VFIOAddressSpace *space = cobj->space;
         VFIOGuestIOMMU *giommu, *tmp;
         VFIOHostDMAWindow *hostwin, *next;
 
-        QLIST_REMOVE(container, next);
+        QLIST_REMOVE(cobj, next);
 
-        QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
+        QLIST_FOREACH_SAFE(giommu, &cobj->giommu_list, giommu_next, tmp) {
             memory_region_unregister_iommu_notifier(
                     MEMORY_REGION(giommu->iommu), &giommu->n);
             QLIST_REMOVE(giommu, giommu_next);
             g_free(giommu);
         }
 
-        QLIST_FOREACH_SAFE(hostwin, &container->hostwin_list, hostwin_next,
+        QLIST_FOREACH_SAFE(hostwin, &cobj->hostwin_list, hostwin_next,
                            next) {
             QLIST_REMOVE(hostwin, hostwin_next);
             g_free(hostwin);
@@ -663,6 +675,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
 
         trace_vfio_disconnect_container(container->fd);
         close(container->fd);
+	vfio_container_destroy(&container->obj);
         g_free(container);
 
         vfio_put_address_space(space);
@@ -678,7 +691,7 @@ static VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
     QLIST_FOREACH(group, &vfio_group_list, next) {
         if (group->groupid == groupid) {
             /* Found it.  Now is it already in the right context? */
-            if (group->container->space->as == as) {
+            if (group->container->obj.space->as == as) {
                 return group;
             } else {
                 error_setg(errp, "group %d used in multiple address spaces",
@@ -790,7 +803,8 @@ static int vfio_get_device(VFIOGroup *group, const char *name,
     }
 
     vbasedev->fd = fd;
-    vbasedev->group = group;
+    vbasedev->group = group; // TODO: needs to remove group in vbasedev.
+                             // TODO: should vbasedev added to group->device_list? any alternative for this tracking?
     QLIST_INSERT_HEAD(&group->device_list, vbasedev, next);
 
     vbasedev->num_irqs = dev_info.num_irqs;
@@ -808,7 +822,7 @@ static int vfio_get_device(VFIOGroup *group, const char *name,
 /*
  * Interfaces for IBM EEH (Enhanced Error Handling)
  */
-static bool vfio_eeh_container_ok(VFIOContainer *container)
+static bool vfio_eeh_container_ok(VFIOLegacyContainer *container)
 {
     /*
      * As of 2016-03-04 (linux-4.5) the host kernel EEH/VFIO
@@ -836,7 +850,7 @@ static bool vfio_eeh_container_ok(VFIOContainer *container)
     return true;
 }
 
-static int vfio_eeh_container_op(VFIOContainer *container, uint32_t op)
+static int vfio_eeh_container_op(VFIOLegacyContainer *container, uint32_t op)
 {
     struct vfio_eeh_pe_op pe_op = {
         .argsz = sizeof(pe_op),
@@ -859,19 +873,19 @@ static int vfio_eeh_container_op(VFIOContainer *container, uint32_t op)
     return ret;
 }
 
-static VFIOContainer *vfio_eeh_as_container(AddressSpace *as)
+static VFIOLegacyContainer *vfio_eeh_as_container(AddressSpace *as)
 {
     VFIOAddressSpace *space = vfio_get_address_space(as);
-    VFIOContainer *container = NULL;
+    VFIOLegacyContainer *container = NULL;
 
     if (QLIST_EMPTY(&space->containers)) {
         /* No containers to act on */
         goto out;
     }
 
-    container = QLIST_FIRST(&space->containers);
+    container = container_of(QLIST_FIRST(&space->containers), VFIOLegacyContainer, obj);
 
-    if (QLIST_NEXT(container, next)) {
+    if (QLIST_NEXT(&container->obj, next)) {
         /*
          * We don't yet have logic to synchronize EEH state across
          * multiple containers
@@ -887,14 +901,14 @@ out:
 
 bool vfio_eeh_as_ok(AddressSpace *as)
 {
-    VFIOContainer *container = vfio_eeh_as_container(as);
+    VFIOLegacyContainer *container = vfio_eeh_as_container(as);
 
     return (container != NULL) && vfio_eeh_container_ok(container);
 }
 
 int vfio_eeh_as_op(AddressSpace *as, uint32_t op)
 {
-    VFIOContainer *container = vfio_eeh_as_container(as);
+    VFIOLegacyContainer *container = vfio_eeh_as_container(as);
 
     if (!container) {
         return -ENODEV;
@@ -902,10 +916,11 @@ int vfio_eeh_as_op(AddressSpace *as, uint32_t op)
     return vfio_eeh_container_op(container, op);
 }
 
-static int vfio_dma_unmap_bitmap(VFIOContainer *container,
+static int vfio_dma_unmap_bitmap(VFIOLegacyContainer *container,
                                  hwaddr iova, ram_addr_t size,
                                  IOMMUTLBEntry *iotlb)
 {
+    struct VFIOContainer *cobj = &container->obj;
     struct vfio_iommu_type1_dma_unmap *unmap;
     struct vfio_bitmap *bitmap;
     uint64_t pages = REAL_HOST_PAGE_ALIGN(size) / qemu_real_host_page_size;
@@ -929,7 +944,7 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
     bitmap->size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
                    BITS_PER_BYTE;
 
-    if (bitmap->size > container->max_dirty_bitmap_size) {
+    if (bitmap->size > cobj->max_dirty_bitmap_size) {
         error_report("UNMAP: Size of bitmap too big 0x%"PRIx64,
                      (uint64_t)bitmap->size);
         ret = -E2BIG;
@@ -959,10 +974,11 @@ unmap_exit:
 /*
  * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
  */
-static int vfio_dma_unmap(VFIOContainer *container,
-                          hwaddr iova, ram_addr_t size,
-                          IOMMUTLBEntry *iotlb)
+static int __vfio_dma_unmap(VFIOLegacyContainer *container,
+                            hwaddr iova, ram_addr_t size,
+                            IOMMUTLBEntry *iotlb)
 {
+    VFIOContainer *cobj = &container->obj;
     struct vfio_iommu_type1_dma_unmap unmap = {
         .argsz = sizeof(unmap),
         .flags = 0,
@@ -970,8 +986,8 @@ static int vfio_dma_unmap(VFIOContainer *container,
         .size = size,
     };
 
-    if (iotlb && container->dirty_pages_supported &&
-        vfio_devices_all_running_and_saving(container)) {
+    if (iotlb && cobj->dirty_pages_supported &&
+        vfio_devices_all_running_and_saving(cobj)) {
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
     }
 
@@ -991,7 +1007,7 @@ static int vfio_dma_unmap(VFIOContainer *container,
         if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
             container->iommu_type == VFIO_TYPE1v2_IOMMU) {
             trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->pgsizes);
+            unmap.size -= 1ULL << ctz64(cobj->pgsizes);
             continue;
         }
         error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
@@ -1001,9 +1017,19 @@ static int vfio_dma_unmap(VFIOContainer *container,
     return 0;
 }
 
-static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
+static int vfio_dma_unmap(VFIOContainer *cobj,
+                          hwaddr iova, ram_addr_t size,
+                          IOMMUTLBEntry *iotlb)
+{
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
+
+    return __vfio_dma_unmap(container, iova, size, iotlb);
+}
+
+static int vfio_dma_map(VFIOContainer *cobj, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
     struct vfio_iommu_type1_dma_map map = {
         .argsz = sizeof(map),
         .flags = VFIO_DMA_MAP_FLAG_READ,
@@ -1022,13 +1048,93 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
      * the VGA ROM space.
      */
     if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
-        (errno == EBUSY && vfio_dma_unmap(container, iova, size, NULL) == 0 &&
+        (errno == EBUSY && __vfio_dma_unmap(container, iova, size, NULL) == 0 &&
          ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
         return 0;
     }
 
     error_report("VFIO_MAP_DMA failed: %s", strerror(errno));
     return -errno;
+}
+
+static void vfio_set_dirty_page_tracking(VFIOContainer *cobj, bool start)
+{
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
+    int ret;
+    struct vfio_iommu_type1_dirty_bitmap dirty = {
+        .argsz = sizeof(dirty),
+    };
+
+    if (start) {
+        dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_START;
+    } else {
+        dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP;
+    }
+
+    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, &dirty);
+    if (ret) {
+        error_report("Failed to set dirty tracking flag 0x%x errno: %d",
+                     dirty.flags, errno);
+    }
+}
+
+static int vfio_get_dirty_bitmap(VFIOContainer *cobj, uint64_t iova,
+                                 uint64_t size, ram_addr_t ram_addr)
+{
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
+    struct vfio_iommu_type1_dirty_bitmap *dbitmap;
+    struct vfio_iommu_type1_dirty_bitmap_get *range;
+    uint64_t pages;
+    int ret;
+
+    dbitmap = g_malloc0(sizeof(*dbitmap) + sizeof(*range));
+
+    dbitmap->argsz = sizeof(*dbitmap) + sizeof(*range);
+    dbitmap->flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP;
+    range = (struct vfio_iommu_type1_dirty_bitmap_get *)&dbitmap->data;
+    range->iova = iova;
+    range->size = size;
+
+    /*
+     * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
+     * qemu_real_host_page_size to mark those dirty. Hence set bitmap's pgsize
+     * to qemu_real_host_page_size.
+     */
+    range->bitmap.pgsize = qemu_real_host_page_size;
+
+    pages = REAL_HOST_PAGE_ALIGN(range->size) / qemu_real_host_page_size;
+    range->bitmap.size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
+                                         BITS_PER_BYTE;
+    range->bitmap.data = g_try_malloc0(range->bitmap.size);
+    if (!range->bitmap.data) {
+        ret = -ENOMEM;
+        goto err_out;
+    }
+
+    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, dbitmap);
+    if (ret) {
+        error_report("Failed to get dirty bitmap for iova: 0x%"PRIx64
+                " size: 0x%"PRIx64" err: %d", (uint64_t)range->iova,
+                (uint64_t)range->size, errno);
+        goto err_out;
+    }
+
+    cpu_physical_memory_set_dirty_lebitmap((unsigned long *)range->bitmap.data,
+                                            ram_addr, pages);
+
+    trace_vfio_get_dirty_bitmap(container->fd, range->iova, range->size,
+                                range->bitmap.size, ram_addr);
+err_out:
+    g_free(range->bitmap.data);
+    g_free(dbitmap);
+
+    return ret;
+}
+
+static bool vfio_is_spapr(VFIOContainer *cobj)
+{
+    VFIOLegacyContainer *container = container_of(cobj, VFIOLegacyContainer, obj);
+    return container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU;
 }
 
 static int vfio_device_groupid(VFIODevice *vbasedev, Error **errp)
@@ -1061,7 +1167,7 @@ static int legacy_attach_device(VFIODevice *vbasedev, AddressSpace *as, Error **
 {
     int groupid = vfio_device_groupid(vbasedev, errp);
     VFIODevice *vbasedev_iter;
-    VFIOContainer *container;
+    VFIOLegacyContainer *container;
     VFIOGroup *group;
     int ret;
 
@@ -1131,10 +1237,32 @@ static void legacy_put_device(VFIODevice *vbasedev)
 
 const VFIOIOMMUOps legacy_ops = {
     .backend_type = VFIO_IOMMU_BACKEND_TYPE_LEGACY,
-    .vfio_iommu_dma_map = vfio_dma_map,
-    .vfio_iommu_dma_unmap = vfio_dma_unmap,
     .vfio_iommu_attach_device = legacy_attach_device,
     .vfio_iommu_detach_device = legacy_detach_device,
     .vfio_iommu_put_device = legacy_put_device,
 };
 
+static void vfio_legacy_container_class_init(ObjectClass *klass,
+                                             void *data)
+{
+    VFIOContainerClass *vlcc = VFIO_CONTAINER_CLASS(klass);
+
+    vlcc->dma_map = vfio_dma_map;
+    vlcc->dma_unmap = vfio_dma_unmap;
+    vlcc->set_dirty_page_tracking = vfio_set_dirty_page_tracking;
+    vlcc->get_dirty_bitmap = vfio_get_dirty_bitmap;
+    vlcc->is_spapr = vfio_is_spapr;
+}
+
+static const TypeInfo vfio_legacy_container_info = {
+    .parent = TYPE_VFIO_CONTAINER,
+    .name = TYPE_VFIO_LEGACY_CONTAINER,
+    .class_init = vfio_legacy_container_class_init,
+};
+
+static void vfio_register_types(void)
+{
+    type_register_static(&vfio_legacy_container_info);
+}
+
+type_init(vfio_register_types)
