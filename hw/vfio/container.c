@@ -1260,6 +1260,7 @@ legacy_attach_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
         return -1;
     }
 
+    vbasedev->container = &group->container->obj;
     return 0;
 }
 
@@ -1268,6 +1269,7 @@ static void legacy_detach_device(VFIODevice *vbasedev)
     vfio_put_group(vbasedev->group);
     QLIST_REMOVE(vbasedev, next);
     vbasedev->group = NULL;
+    vbasedev->container = NULL;
     trace_vfio_put_base_device(vbasedev->fd);
     close(vbasedev->fd);
     g_free(vbasedev->name);
