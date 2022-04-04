@@ -350,9 +350,9 @@ err_out:
 
 static void vfio_listener_release(VFIOLegacyContainer *container)
 {
-    VFIOContainer *bcontainer = &container->obj;
+//    VFIOContainer *bcontainer = &container->obj;
 
-    memory_listener_unregister(&bcontainer->listener);
+//    memory_listener_unregister(&bcontainer->listener);
     if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
         memory_listener_unregister(&container->prereg_listener);
     }
@@ -875,9 +875,9 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
 
-    bcontainer->listener = vfio_memory_listener;
-
-    memory_listener_register(&bcontainer->listener, bcontainer->space->as);
+    if (!bcontainer->space->listener_initialized) {
+        vfio_as_register_listener( bcontainer->space);
+    }
 
     if (bcontainer->error) {
         ret = -1;
@@ -918,6 +918,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
     QLIST_REMOVE(group, container_next);
     group->container = NULL;
 
+#if 0
     /*
      * Explicitly release the listener first before unset container,
      * since unset may destroy the backend container if it's the last
@@ -926,7 +927,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
     if (QLIST_EMPTY(&container->group_list)) {
         vfio_listener_release(container);
     }
-
+#endif
     if (ioctl(group->fd, VFIO_GROUP_UNSET_CONTAINER, &container->fd)) {
         error_report("vfio: error disconnecting group %d from container",
                      group->groupid);
