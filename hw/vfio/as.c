@@ -903,7 +903,7 @@ const VFIOIOMMUOps *vfio_iommu_ops(VFIOIOMMUBackendType backend_type)
 int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
 {
     vbasedev->iommu_ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
-    return ops->vfio_iommu_attach_device(vbasedev, as, errp);
+    return vbasedev->iommu_ops->vfio_iommu_attach_device(vbasedev, as, errp);
 }
 
 void vfio_put_device(VFIODevice *vbasedev)
