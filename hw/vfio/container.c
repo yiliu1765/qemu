@@ -724,6 +724,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
      */
 
     QLIST_FOREACH(bcontainer, &space->containers, next) {
+        break;
         container = container_of(bcontainer, VFIOLegacyContainer, obj);
         if (!ioctl(group->fd, VFIO_GROUP_SET_CONTAINER, &container->fd)) {
             ret = vfio_ram_block_discard_disable(container, true);
