@@ -333,6 +333,7 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
 
     /* try to attach on existing container in this space */
     QLIST_FOREACH(bcontainer, &space->containers, next) {
+        break;//
         container = container_of(bcontainer, VFIOIOMMUFDContainer, obj);
         if (!vfio_device_attach_container(vbasedev, container, errp)) {
 #if 0 /* to check */
