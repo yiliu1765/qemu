@@ -292,6 +292,16 @@ static void iommufd_reset_handler(void *opaque)
     foreach_vfio_dev(vfio_reset, NULL);
 }
 
+static int vfio_ram_block_discard_disable(bool state)
+{
+    /*
+     * We support coordinated discarding of RAM via the RamDiscardManager.
+     */
+    return ram_block_uncoordinated_discard_disable(state);
+}
+
+static void iommufd_detach_device(VFIODevice *vbasedev);
+
 static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
                                  Error **errp)
 {
@@ -328,8 +338,7 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
             trace_vfio_iommufd_fail_attach_existing_container(msg);
             error_free(err);
         } else {
-#if 0 /* to check */
-            ret = vfio_ram_block_discard_disable(container, true);
+            ret = vfio_ram_block_discard_disable(true);
             if (ret) {
                 vfio_device_detach_container(vbasedev, container);
                 vfio_put_address_space(space);
@@ -338,7 +347,6 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
                                  "Cannot set discarding of RAM broken");
                 return ret;
             }
-#endif
             goto out;
         }
     }
@@ -361,12 +369,11 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
     vfio_container_init(bcontainer, sizeof(*bcontainer),
                         TYPE_VFIO_IOMMUFD_CONTAINER, space);
 
-    /* TODO kvmgroup? */
-    vfio_host_win_add(bcontainer, 0, (hwaddr)-1, 4096);
 
     ret = vfio_device_attach_container(vbasedev, container, errp);
     if (ret) {
         /* todo check if any other thing to do */
+        error_setg_errno(errp, -ret, "Failed to attach device to iommufd container");
         vfio_container_destroy(bcontainer);
         g_free(container);
         iommufd_put_ioas(iommufd, ioas_id);
@@ -374,6 +381,28 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
         close(vbasedev->fd);
         return ret;
     }
+
+    ret = vfio_ram_block_discard_disable(true);
+    if (ret) {
+        error_setg_errno(errp, -ret, "Cannot set discarding of RAM broken");
+        vfio_device_detach_container(vbasedev, container);
+        vfio_container_destroy(bcontainer);
+        g_free(container);
+        iommufd_put_ioas(iommufd, ioas_id);
+        vfio_put_address_space(space);
+        close(vbasedev->fd);
+        return ret;
+    }
+
+    /* TODO: for now iommufd BE is on par with vfio iommu type1, so it's
+     * fine to add the whole range as window. For SPAPR, below code
+     * should be updated. */
+    vfio_host_win_add(bcontainer, 0, (hwaddr)-1, 4096);
+
+    /* TODO: kvmgroup, unable to do it before the protocol done
+     * between iommufd and kvm */
+
+    QLIST_INIT(&container->hwpt_list);
     QLIST_INSERT_HEAD(&space->containers, bcontainer, next);
 
     bcontainer->listener = vfio_memory_listener;
@@ -385,14 +414,22 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
 
 out:
 
+    /* TODO: examine RAM_BLOCK_DISCARD stuff, should we do group level
+     * for discarding incompatibility check as well? */
+    if (vbasedev->ram_block_discard_allowed) {
+        vfio_ram_block_discard_disable(false);
+    }
+
     ret = ioctl(devfd, VFIO_DEVICE_GET_INFO, &dev_info);
     if (ret) {
         error_setg_errno(errp, errno, "error getting device info");
-        vfio_device_detach_container(vbasedev, container);
-        close(devfd);
+        /* Needs to use iommufd_detach_device() as this may be failed after
+	 * attaching a new deivce to an existing container. */
+        iommufd_detach_device(vbasedev);
+        close(vbasedev->fd);
         return ret;
     }
-    /* TODO examine RAM_BLOCK_DISCARD stuff */
+
     vbasedev->group = 0;
     vbasedev->num_irqs = dev_info.num_irqs;
     vbasedev->num_regions = dev_info.num_regions;
@@ -439,6 +476,10 @@ static void iommufd_detach_device(VFIODevice *vbasedev)
 
     if (!bcontainer) {
         goto out;
+    }
+
+    if (!vbasedev->ram_block_discard_allowed) {
+        vfio_ram_block_discard_disable(false);
     }
 
     container = container_of(bcontainer, VFIOIOMMUFDContainer, obj);
