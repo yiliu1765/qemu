@@ -33,6 +33,7 @@
 #include "hw/qdev-core.h"
 #include "sysemu/reset.h"
 #include "qemu/cutils.h"
+#include "qemu/char_dev.h"
 
 static bool iommufd_check_extension(VFIOContainer *bcontainer,
                                     VFIOContainerFeature feat)
@@ -84,12 +85,12 @@ static int iommufd_unmap(VFIOContainer *bcontainer,
 
 static int vfio_get_devicefd(const char *sysfs_path, Error **errp)
 {
-    long int vfio_id = -1, ret = -ENOTTY;
-    char *path, *tmp = NULL;
+    long int ret = -ENOTTY;
+    char *path, *vfio_dev_path = NULL, *vfio_path = NULL;
     DIR *dir;
     struct dirent *dent;
-    struct stat st;
     gchar *contents;
+    struct stat st;
     gsize length;
     int major, minor;
     dev_t vfio_devt;
@@ -97,60 +98,52 @@ static int vfio_get_devicefd(const char *sysfs_path, Error **errp)
     path = g_strdup_printf("%s/vfio-device", sysfs_path);
     if (stat(path, &st) < 0) {
         error_setg_errno(errp, errno, "no such host device");
-        goto out;
+        goto out_free_path;
     }
 
     dir = opendir(path);
     if (!dir) {
         error_setg_errno(errp, errno, "couldn't open dirrectory %s", path);
-        goto out;
+        goto out_free_path;
     }
 
     while ((dent = readdir(dir))) {
-        const char *end_name;
-
         if (!strncmp(dent->d_name, "vfio", 4)) {
-            ret = qemu_strtol(dent->d_name + 4, &end_name, 10, &vfio_id);
-            if (ret) {
-                error_setg(errp, "suspicious vfio* file in %s", path);
-                goto out;
-            }
+            vfio_dev_path = g_strdup_printf("%s/%s/dev", path, dent->d_name);
             break;
         }
     }
 
+    if (!vfio_dev_path) {
+        error_setg(errp, "failed to find vfio-device/vfioX/dev");
+        goto out_free_path;
+    }
+
     /* check if the major:minor matches */
-    tmp = g_strdup_printf("%s/%s/dev", path, dent->d_name);
-    if (!g_file_get_contents(tmp, &contents, &length, NULL)) {
-        error_setg(errp, "failed to load \"%s\"", tmp);
-        goto out;
+    if (!g_file_get_contents(vfio_dev_path, &contents, &length, NULL)) {
+        error_setg(errp, "failed to load \"%s\"", vfio_dev_path);
+        goto out_free_dev_path;
     }
 
     if (sscanf(contents, "%d:%d", &major, &minor) != 2) {
-        error_setg(errp, "failed to load \"%s\"", tmp);
-        goto out;
+        error_setg(errp, "failed to get major:mino for \"%s\"", vfio_dev_path);
+        goto out_free_dev_path;
     }
     g_free(contents);
-    g_free(tmp);
-
-    tmp = g_strdup_printf("/dev/vfio/devices/vfio%ld", vfio_id);
-    if (stat(tmp, &st) < 0) {
-        error_setg_errno(errp, errno, "no such vfio device");
-        goto out;
-    }
     vfio_devt = makedev(major, minor);
-    if (st.st_rdev != vfio_devt) {
-        error_setg(errp, "minor do not match: %lu, %lu", vfio_devt, st.st_rdev);
-        goto out;
+
+    vfio_path = g_strdup_printf("/dev/vfio/devices/%s", dent->d_name);
+    ret = open_cdev(vfio_path, vfio_devt);
+    if (ret < 0) {
+        error_setg(errp, "Failed to open %s", vfio_path);
     }
 
-    ret = qemu_open_old(tmp, O_RDWR);
-    if (ret < 0) {
-        error_setg(errp, "Failed to open %s", tmp);
-    }
-    trace_vfio_iommufd_get_devicefd(tmp, ret);
-out:
-    g_free(tmp);
+    trace_vfio_iommufd_get_devicefd(vfio_path, ret);
+    g_free(vfio_path);
+
+out_free_dev_path:
+    g_free(vfio_dev_path);
+out_free_path:
     g_free(path);
 
     if (*errp) {
