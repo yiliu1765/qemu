@@ -200,22 +200,19 @@ static VFIOIOASHwpt *vfio_find_hwpt_for_dev(VFIOIOMMUFDContainer *container,
 }
 
 static int
-__vfio_device_detach_hwpt(VFIODevice *vbasedev, int iommufd,
-                          uint32_t *pasid, Error **errp)
+__vfio_device_detach_hwpt(VFIODevice *vbasedev, Error **errp)
 {
     struct vfio_device_detach_hwpt detach_data = {
         .argsz = sizeof(detach_data),
-        .flags = pasid ? VFIO_DEVICE_DETACH_FLAG_PASID : 0,
-        .iommufd = iommufd,
-        .pasid = pasid ? *pasid : 0,
+        .flags = 0,
     };
     int ret = 0;
 
     ret = ioctl(vbasedev->fd, VFIO_DEVICE_DETACH_HWPT, &detach_data);
     if (ret) {
         ret = -errno;
-        error_setg_errno(errp, -ret, "detach %s + pasid=%d failed",
-                         vbasedev->name, pasid ? *pasid : 0xffffffff);
+        error_setg_errno(errp, -ret, "detach %s from hwpt failed",
+                         vbasedev->name);
     }
     return ret;
 }
@@ -225,7 +222,7 @@ __vfio_device_detach_container(VFIODevice *vbasedev,
                                VFIOIOMMUFDContainer *container,
                                Error **errp)
 {
-    __vfio_device_detach_hwpt(vbasedev, container->be->fd, NULL, errp);
+    __vfio_device_detach_hwpt(vbasedev, errp);
     trace_vfio_iommufd_detach_device(container->be->fd, vbasedev->name);
 
     /* iommufd unbind is done per device fd close */
@@ -566,17 +563,16 @@ const VFIOContainerOps iommufd_container_ops = {
     .detach_device = iommufd_detach_device,
     .reset = vfio_iommufd_container_reset,
 };
+
 static int vfio_iommu_device_attach_hwpt(IOMMUFDDevice *idev,
-                                         uint32_t *pasid,
                                          uint32_t hwpt_id)
 {
     VFIODevice *vbasedev = container_of(idev, VFIODevice, idev);
     struct vfio_device_attach_hwpt attach = {
         .argsz = sizeof(attach),
-        .flags = pasid ? VFIO_DEVICE_ATTACH_FLAG_PASID : 0,
+        .flags = 0,
         .iommufd = idev->iommufd,
         .hwpt_id = hwpt_id,
-        .pasid = pasid ? *pasid : 0,
     };
     int ret;
 
@@ -588,14 +584,13 @@ static int vfio_iommu_device_attach_hwpt(IOMMUFDDevice *idev,
     return ret;
 }
 
-static int vfio_iommu_device_detach_hwpt(IOMMUFDDevice *idev,
-                                         uint32_t *pasid)
+static int vfio_iommu_device_detach_hwpt(IOMMUFDDevice *idev)
 {
     VFIODevice *vbasedev = container_of(idev, VFIODevice, idev);
     Error *err = NULL;
     int ret;
 
-    ret = __vfio_device_detach_hwpt(vbasedev, idev->iommufd, pasid, &err);
+    ret = __vfio_device_detach_hwpt(vbasedev, &err);
     error_free(err);
     return ret;
 }
