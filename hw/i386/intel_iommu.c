@@ -3831,8 +3831,8 @@ static void vtd_piotlb_pasid_invalidate(IntelIOMMUState *s,
     VTDIOTLBPageInvInfo info;
     VTDAddressSpace *vtd_as;
     VTDContextEntry ce;
+    VTDPASIDEntry pe;
     int ret;
-    hwaddr size = (1 << am) * VTD_PAGE_SIZE;
 
     cache_info = g_malloc0(sizeof(*cache_info));
 
@@ -3886,7 +3886,7 @@ static void vtd_piotlb_page_invalidate(IntelIOMMUState *s, uint16_t domain_id,
     VTDIOTLBPageInvInfo info;
     VTDAddressSpace *vtd_as;
     VTDContextEntry ce;
-    VTDPASIDEntry pe;
+    hwaddr size = (1 << am) * VTD_PAGE_SIZE;
     int ret;
 
     cache_info = g_malloc0(sizeof(*cache_info));
