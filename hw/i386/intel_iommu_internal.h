@@ -194,6 +194,8 @@
 #define VTD_ECAP_SMTS               (1ULL << 43)
 #define VTD_ECAP_SLTS               (1ULL << 46)
 
+#define VTD_ECAP_RPS                (1ULL << 49)
+
 /* 1st level related caps */
 #define VTD_CAP_FL1GP               (1ULL << 56)
 #define VTD_CAP_FL5LP               (1ULL << 60)

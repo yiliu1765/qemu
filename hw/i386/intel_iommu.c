@@ -40,6 +40,7 @@
 #include "migration/vmstate.h"
 #include "trace.h"
 #include "qemu/jhash.h"
+#include "sysemu/iommufd.h"
 
 /* context entry operations */
 #define VTD_CE_GET_RID2PASID(ce) \
@@ -1941,19 +1942,11 @@ static void vtd_context_global_invalidate(IntelIOMMUState *s)
     vtd_iommu_replay_all(s);
 }
 
-static void vtd_dma_fault_notifier_handler(void *opaque)
-{
-    info_report("vtd: Unable to handle PRQ so far");
-}
-
-static void vtd_init_stage1_config_data(union iommu_stage1_config *config,
+static void vtd_init_fl_hwpt_data(struct iommu_hwpt_intel_vtd *vtd,
                                         VTDPASIDEntry *pe)
 {
-    struct iommu_stage1_config_vtd *vtd;
+    memset(vtd, 0, sizeof(*vtd));
 
-    memset(config, 0, sizeof(*config));
-
-    vtd = &config->vtd;
     vtd->flags =  (VTD_SM_PASID_ENTRY_SRE_BIT(pe->val[2]) ?
                                         IOMMU_VTD_PGTBL_SRE : 0) |
                   (VTD_SM_PASID_ENTRY_WPE_BIT(pe->val[2]) ?
@@ -1968,9 +1961,10 @@ static void vtd_init_stage1_config_data(union iommu_stage1_config *config,
                                         IOMMU_VTD_PGTBL_EMTE : 0) |
                   (VTD_SM_PASID_ENTRY_CD_BIT(pe->val[1]) ?
                                         IOMMU_VTD_PGTBL_CD : 0);
-    vtd->addr_width = vtd_pe_get_fl_aw(pe);
     vtd->pat = VTD_SM_PASID_ENTRY_PAT(pe->val[1]);
     vtd->emt = VTD_SM_PASID_ENTRY_EMT(pe->val[1]);
+    vtd->addr_width = vtd_pe_get_fl_aw(pe);
+    vtd->s1_pgtbl = (uint64_t)vtd_pe_get_flpt_base(pe);
 }
 
 /* Called under iommu->lock */
@@ -1984,12 +1978,14 @@ static int vtd_get_s2_hwpt(IntelIOMMUState *s, IOMMUFDDevice *idev,
         s->s2_hwpt->users++;
         return 0;
     }
-    ret = iommufd_backend_alloc_s2_hwpt(idev->iommufd, idev->dev_id,
-                                        idev->ioas_id, s2_hwpt);
+    ret = iommufd_backend_alloc_hwpt(idev->iommufd, idev->dev_id,
+                                     idev->ioas_id, IOMMU_DEVICE_DATA_INTEL_VTD,
+                                     0, NULL, s2_hwpt);
     if (!ret) {
         s->s2_hwpt = g_malloc0(sizeof(*s->s2_hwpt));
         s->s2_hwpt->hwpt_id = *s2_hwpt;
         s->s2_hwpt->iommufd = idev->iommufd;
+        s->s2_hwpt->parent_id = idev->ioas_id;
         s->s2_hwpt->users = 1;
     }
     return ret;
@@ -2013,53 +2009,35 @@ static void vtd_put_s2_hwpt(IntelIOMMUState *s)
 static int vtd_init_fl_hwpt(IntelIOMMUState *s, VTDHwpt *hwpt,
                             IOMMUFDDevice *idev, VTDPASIDEntry *pe)
 {
-    union iommu_stage1_config config;
-    EventNotifier *n = &hwpt->notifier;
+    struct iommu_hwpt_intel_vtd vtd;
     uint32_t hwpt_id, s2_hwptid;
-    int ret, fd, fault_data_fd;
+    int ret;
 
-    ret = event_notifier_init(n, 0);
-    if (ret) {
-        error_report("vtd: Unable to init event notifier for dma fault (%d)",
-                     ret);
-        return ret;
-    }
-
-    fd = event_notifier_get_fd(n);
-
-    vtd_init_stage1_config_data(&config, pe);
+    vtd_init_fl_hwpt_data(&vtd, pe);
 
     ret = vtd_get_s2_hwpt(s, idev, &s2_hwptid);
     if (ret) {
-        event_notifier_cleanup(n);
         return ret;
     }
 
-    ret = iommufd_backend_alloc_s1_hwpt(idev->iommufd, idev->dev_id,
-                                vtd_pe_get_flpt_base(pe), s2_hwptid,
-                                fd, &config, &hwpt_id, &fault_data_fd);
+    ret = iommufd_backend_alloc_hwpt(idev->iommufd, idev->dev_id,
+                                     s2_hwptid, IOMMU_DEVICE_DATA_INTEL_VTD,
+                                     sizeof(vtd), &vtd, &hwpt_id);
     if (ret) {
         vtd_put_s2_hwpt(s);
-        event_notifier_cleanup(n);
         return ret;
     }
 
     hwpt->hwpt_id = hwpt_id;
     hwpt->iommufd = idev->iommufd;
-    hwpt->eventfd = fd;
-    hwpt->fault_fd = fault_data_fd;
-    hwpt->fault_tail_index = 0;
-    qemu_set_fd_handler(fd, vtd_dma_fault_notifier_handler, NULL, hwpt);
+    hwpt->parent_id = s2_hwptid;
     return 0;
 }
 
 static void vtd_destroy_fl_hwpt(IntelIOMMUState *s, VTDHwpt *hwpt)
 {
-    qemu_set_fd_handler(hwpt->eventfd, NULL, NULL, hwpt);
-    close(hwpt->fault_fd);
     iommufd_backend_free_id(hwpt->iommufd, hwpt->hwpt_id);
     vtd_put_s2_hwpt(s);
-    event_notifier_cleanup(&hwpt->notifier);
 }
 
 static int vtd_dev_get_rid2pasid(IntelIOMMUState *s, uint8_t bus_num,
@@ -2090,15 +2068,12 @@ static int vtd_dev_get_rid2pasid(IntelIOMMUState *s, uint8_t bus_num,
     return ret;
 }
 
-static int vtd_hpasid_find_by_guest(IntelIOMMUState *s, uint32_t *pasid);
-
 static int vtd_device_attach_pgtbl(IOMMUFDDevice *idev, VTDPASIDEntry *pe,
                                    VTDPASIDAddressSpace *vtd_pasid_as,
                                    uint32_t rid_pasid, bool update)
 {
     IntelIOMMUState *s = vtd_pasid_as->iommu_state;
     VTDHwpt *hwpt = &vtd_pasid_as->hwpt;
-    uint32_t *pasid_ptr = NULL;
     int ret;
 
     /* If pe->gptt != FLT, should be go ahead to do bind as host only
@@ -2130,20 +2105,16 @@ static int vtd_device_attach_pgtbl(IOMMUFDDevice *idev, VTDPASIDEntry *pe,
         hwpt->iommufd = idev->iommufd;
     }
 
-    if (vtd_pasid_as->pasid != rid_pasid) {
-        pasid_ptr = &vtd_pasid_as->pasid;
-    }
-
-    if (update || !pasid_ptr) {
+    if (update || vtd_pasid_as->pasid == rid_pasid) {
         printf("%s, try to unbind PASID %u - 1\n", __func__, vtd_pasid_as->pasid);
-        ret = iommufd_device_detach_hwpt(idev, pasid_ptr);
+        ret = iommufd_device_detach_hwpt(idev);
         printf("%s, try to unbind PASID %u - 2, ret: %d\n", __func__, vtd_pasid_as->pasid, ret);
         if (ret) {
             goto out;
         }
     }
     printf("%s, try to bind PASID %u to hwpt: %u - 1\n", __func__, vtd_pasid_as->pasid, hwpt->hwpt_id);
-    ret = iommufd_device_attach_hwpt(idev, pasid_ptr, hwpt->hwpt_id);
+    ret = iommufd_device_attach_hwpt(idev, hwpt->hwpt_id);
     printf("%s, try to bind PASID %u - 2, ret: %d\n", __func__, vtd_pasid_as->pasid, ret);
 out:
     if (ret) {
@@ -2162,7 +2133,6 @@ static int vtd_device_detach_pgtbl(IOMMUFDDevice *idev,
 {
     IntelIOMMUState *s = vtd_pasid_as->iommu_state;
     VTDHwpt *hwpt = &vtd_pasid_as->hwpt;
-    uint32_t *pasid_ptr = NULL;
     VTDPASIDEntry *cached_pe = vtd_pasid_as->pasid_cache_entry.cache_filled ?
                        &vtd_pasid_as->pasid_cache_entry.pasid_entry : NULL;
     int ret;
@@ -2173,11 +2143,12 @@ static int vtd_device_detach_pgtbl(IOMMUFDDevice *idev,
     }
 
     if (vtd_pasid_as->pasid != rid_pasid) {
-        pasid_ptr = &vtd_pasid_as->pasid;
+        printf("%s, don't support non-rid_pasid so far\n", __func__);
+        return 0;
     }
 
     printf("%s, try to unbind PASID %u - 1\n", __func__, vtd_pasid_as->pasid);
-    ret = iommufd_device_detach_hwpt(idev, pasid_ptr);
+    ret = iommufd_device_detach_hwpt(idev);
     printf("%s, try to unbind PASID %u - 2, ret: %d\n", __func__, vtd_pasid_as->pasid, ret);
     if (!ret) {
         if (vtd_pe_pgtt_is_flt(cached_pe)) {
@@ -2199,7 +2170,7 @@ static int vtd_bind_guest_pasid(VTDPASIDAddressSpace *vtd_pasid_as,
     VTDBus *vtd_bus = vtd_pasid_as->vtd_bus;
     VTDIOMMUFDDevice *vtd_idev;
     IOMMUFDDevice *idev;
-    uint32_t pasid, rid_pasid;
+    uint32_t rid_pasid;
     int devfn = vtd_pasid_as->devfn;
     int ret = -1;
     bool update = false;
@@ -2211,14 +2182,14 @@ static int vtd_bind_guest_pasid(VTDPASIDAddressSpace *vtd_pasid_as,
     }
 
     idev = vtd_idev->idev;
-    pasid = vtd_pasid_as->pasid;
-    if (vtd_hpasid_find_by_guest(s, &pasid)) {
-        error_report("Invalid gpasid: %d!\n", vtd_pasid_as->pasid);
-        return -1;
-    }
 
     if (vtd_dev_get_rid2pasid(s, pci_bus_num(vtd_bus->bus), devfn, &rid_pasid)) {
         error_report("Unable to get rid_pasid for devfn: %d!\n", devfn);
+        return -1;
+    }
+
+    if (vtd_pasid_as->pasid != rid_pasid) {
+        printf("%s, don't support non-rid_pasid so far\n", __func__);
         return -1;
     }
 
