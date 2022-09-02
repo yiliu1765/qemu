@@ -2775,7 +2775,7 @@ static void vtd_replay_guest_pasid_bindings(IntelIOMMUState *s,
                                             VTDPASIDCacheInfo *pc_info)
 {
     VTDIOMMUFDDevice *vtd_idev;
-    int start = 0, end = VTD_HPASID_MAX;
+    int start = 0, end = 0;
     VTDPASIDCacheInfo walk_info;
 
     switch (pc_info->type) {
