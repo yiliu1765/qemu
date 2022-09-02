@@ -148,6 +148,8 @@ struct VTDIOMMUFDDevice {
     uint8_t devfn;
     IOMMUFDDevice *idev;
     IntelIOMMUState *iommu_state;
+    /* This is a WA to mark the hwpt attached before enabling vIOMMU detached or not */
+    bool default_hwpt_detached;
     QLIST_ENTRY(VTDIOMMUFDDevice) next;
 };
 

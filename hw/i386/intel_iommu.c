@@ -2529,11 +2529,12 @@ static int vtd_dev_get_rid2pasid(IntelIOMMUState *s, uint8_t bus_num,
     return ret;
 }
 
-static int vtd_device_attach_pgtbl(IOMMUFDDevice *idev, VTDPASIDEntry *pe,
+static int vtd_device_attach_pgtbl(VTDIOMMUFDDevice *vtd_idev, VTDPASIDEntry *pe,
                                    VTDPASIDAddressSpace *vtd_pasid_as,
                                    uint32_t rid_pasid, bool update)
 {
     IntelIOMMUState *s = vtd_pasid_as->iommu_state;
+    IOMMUFDDevice *idev = vtd_idev->idev;
     VTDHwpt *hwpt = &vtd_pasid_as->hwpt;
     int ret;
 
@@ -2566,12 +2567,15 @@ static int vtd_device_attach_pgtbl(IOMMUFDDevice *idev, VTDPASIDEntry *pe,
         hwpt->iommufd = idev->iommufd;
     }
 
-    if (update || vtd_pasid_as->pasid == rid_pasid) {
+    if (update || ((vtd_pasid_as->pasid == rid_pasid) && !vtd_idev->default_hwpt_detached)) {
         printf("%s, try to unbind PASID %u - 1\n", __func__, vtd_pasid_as->pasid);
         ret = iommufd_device_detach_hwpt(idev);
         printf("%s, try to unbind PASID %u - 2, ret: %d\n", __func__, vtd_pasid_as->pasid, ret);
         if (ret) {
             goto out;
+        }
+        if (!update) {
+            vtd_idev->default_hwpt_detached = true;
         }
     }
     printf("%s, try to bind PASID %u to hwpt: %u - 1\n", __func__, vtd_pasid_as->pasid, hwpt->hwpt_id);
@@ -2660,7 +2664,7 @@ static int vtd_bind_guest_pasid(VTDPASIDAddressSpace *vtd_pasid_as,
         /* Fall through */
     case VTD_PASID_BIND:
     {
-        ret = vtd_device_attach_pgtbl(idev, pe, vtd_pasid_as, rid_pasid, update);
+        ret = vtd_device_attach_pgtbl(vtd_idev, pe, vtd_pasid_as, rid_pasid, update);
         break;
     }
     case VTD_PASID_UNBIND:
@@ -3600,7 +3604,7 @@ static void vtd_replay_guest_pasid_bindings(IntelIOMMUState *s,
                                             VTDPASIDCacheInfo *pc_info)
 {
     VTDIOMMUFDDevice *vtd_idev;
-    int start = 0, end = 0;
+    int start = 0, end = 1;
     VTDPASIDCacheInfo walk_info;
 
     switch (pc_info->type) {
@@ -5256,6 +5260,7 @@ static int vtd_dev_set_iommu_device(PCIBus *bus, void *opaque,
     vtd_idev->devfn = (uint8_t)devfn;
     vtd_idev->iommu_state = s;
     vtd_idev->idev = idev;
+    vtd_idev->default_hwpt_detached = false;
     QLIST_INSERT_HEAD(&s->vtd_idev_list, vtd_idev, next);
 
     vtd_iommu_unlock(s);
