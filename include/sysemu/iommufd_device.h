@@ -28,6 +28,10 @@ struct IOMMUFDDevice {
     uint32_t dev_id;
     uint32_t def_hwpt_id;
     bool initialized;
+
+    /* vIOMMU specific */
+    uint32_t parent_hwpt;
+    int parent_hwpt_users;
 };
 
 int iommufd_device_attach_hwpt(IOMMUFDDevice *idev, uint32_t hwpt_id);
