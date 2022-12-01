@@ -39,6 +39,7 @@
 #include "kvm/kvm_i386.h"
 #include "migration/vmstate.h"
 #include "trace.h"
+#include "sysemu/iommufd.h"
 
 /* context entry operations */
 #define VTD_CE_GET_RID2PASID(ce) \
@@ -4280,6 +4281,39 @@ static bool vtd_check_hiod(IntelIOMMUState *s, HostIOMMUDevice *hiod,
     if (!s->scalable_modern) {
         /* All checks requested by VTD non-modern mode pass */
         return true;
+    }
+
+    /* Remaining checks are all modern mode specific */
+    if (!object_dynamic_cast(OBJECT(hiod), TYPE_HOST_IOMMU_DEVICE_IOMMUFD)) {
+        error_setg(errp, "Need IOMMUFD backend in scalable modern mode");
+        return false;
+    }
+
+    ret = hiodc->get_cap(hiod, HOST_IOMMU_DEVICE_CAP_IOMMU_TYPE, errp);
+    if (ret < 0) {
+        return false;
+    }
+    if (ret != HOST_IOMMU_DEVICE_IOMMU_HW_INFO_TYPE_INTEL_VTD) {
+        error_setg(errp, "Incompatible host platform IOMMU type %d", ret);
+        return false;
+    }
+
+    ret = hiodc->get_cap(hiod, HOST_IOMMU_DEVICE_CAP_NESTING, errp);
+    if (ret < 0) {
+        return false;
+    }
+    if (ret != 1) {
+        error_setg(errp, "Host IOMMU doesn't support nested translation");
+        return false;
+    }
+
+    ret = hiodc->get_cap(hiod, HOST_IOMMU_DEVICE_CAP_FS1GP, errp);
+    if (ret < 0) {
+        return false;
+    }
+    if (s->fs1gp && ret != 1) {
+        error_setg(errp, "Stage-1 1GB huge page is unsupported by host IOMMU");
+        return false;
     }
 
     error_setg(errp, "host device is unsupported in scalable modern mode yet");
