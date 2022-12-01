@@ -4205,10 +4205,66 @@ VTDAddressSpace *vtd_find_add_as(IntelIOMMUState *s, PCIBus *bus,
     return vtd_dev_as;
 }
 
+/* cap/ecap are readonly after vIOMMU finalized */
+static int vtd_check_iommufd_hdev_frozen(IntelIOMMUState *s,
+                                          struct iommu_hw_info_vtd *vtd,
+                                          Error **errp)
+{
+    if (s->cap & ~vtd->cap_reg & VTD_CAP_MASK) {
+        error_setg(errp, "vIOMMU cap %lx isn't compatible with host %llx",
+                   s->cap, vtd->cap_reg);
+        return -EINVAL;
+    }
+
+    if (s->ecap & ~vtd->ecap_reg & VTD_ECAP_MASK) {
+        error_setg(errp, "vIOMMU ecap %lx isn't compatible with host %llx",
+                   s->ecap, vtd->ecap_reg);
+        return -EINVAL;
+    }
+
+    if (s->ecap & vtd->ecap_reg & VTD_ECAP_PASID &&
+        VTD_GET_PSS(s->ecap) > VTD_GET_PSS(vtd->ecap_reg)) {
+        error_setg(errp, "vIOMMU pasid bits %lu > host pasid bits %llu",
+                   VTD_GET_PSS(s->ecap), VTD_GET_PSS(vtd->ecap_reg));
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+/* sync host cap/ecap to vIOMMU */
+static void vtd_sync_iommufd_hdev(uint64_t *cap, uint64_t *ecap,
+                                 struct iommu_hw_info_vtd *vtd)
+{
+    uint64_t tmp, pasid_bits;
+
+    tmp = *cap & vtd->cap_reg & VTD_CAP_MASK;
+    *cap &= ~VTD_CAP_MASK;
+    *cap |= tmp;
+
+    tmp = *ecap & vtd->ecap_reg & VTD_ECAP_MASK;
+    *ecap &= ~VTD_ECAP_MASK;
+    *ecap |= tmp;
+
+    pasid_bits = VTD_GET_PSS(vtd->ecap_reg);
+    if (*ecap & VTD_ECAP_PASID &&
+        VTD_GET_PSS(*ecap) > pasid_bits) {
+        *ecap &= ~VTD_ECAP_PSS_MASK;
+        *ecap |= VTD_ECAP_PSS(pasid_bits);
+    }
+}
+
 static int vtd_check_legacy_hdev(IntelIOMMUState *s,
                                  IOMMULegacyDevice *ldev,
                                  Error **errp)
 {
+    if (s->scalable_modern) {
+        /* Modern vIOMMU and legacy backend */
+        error_setg(errp, "Need IOMMUFD backend to setup nested page table");
+        return -EINVAL;
+    }
+
+    /* Legacy vIOMMU and legacy backend */
     return 0;
 }
 
@@ -4221,7 +4277,7 @@ static int vtd_check_iommufd_hdev(IntelIOMMUState *s,
     struct iommu_hw_info_vtd vtd;
     enum iommu_hw_info_type type = IOMMU_HW_INFO_TYPE_INTEL_VTD;
     long host_mgaw, viommu_mgaw = VTD_MGAW_FROM_CAP(s->cap);
-    uint64_t tmp_cap = s->cap;
+    uint64_t tmp_cap = s->cap, tmp_ecap = s->ecap;
     int ret;
 
     ret = iommufd_device_get_info(idev, &type, sizeof(vtd), &vtd, errp);
@@ -4245,7 +4301,23 @@ static int vtd_check_iommufd_hdev(IntelIOMMUState *s,
         tmp_cap |= VTD_CAP_MGAW(host_mgaw + 1);
     }
 
-    if (s->cap != tmp_cap) {
+    if (!s->scalable_modern) {
+        goto done;
+    }
+
+    if (!(vtd.ecap_reg & VTD_ECAP_NEST)) {
+        error_setg(errp, "Need nested translation on host in modern mode");
+        return -EINVAL;
+    }
+
+    if (s->cap_frozen) {
+        return vtd_check_iommufd_hdev_frozen(s, &vtd, errp);
+    }
+
+    vtd_sync_iommufd_hdev(&tmp_cap, &tmp_ecap, &vtd);
+
+done:
+    if (s->cap != tmp_cap || s->ecap != tmp_ecap) {
         if (vtd_mig_blocker == NULL) {
             error_setg(&vtd_mig_blocker,
                        "cap/ecap update from host IOMMU block migration");
@@ -4253,6 +4325,7 @@ static int vtd_check_iommufd_hdev(IntelIOMMUState *s,
         }
         if (!ret) {
             s->cap = tmp_cap;
+            s->ecap = tmp_ecap;
         }
     }
     return ret;
