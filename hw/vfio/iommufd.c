@@ -259,7 +259,6 @@ static int vfio_device_attach_container(VFIODevice *vbasedev,
         .argsz = sizeof(bind),
         .flags = 0,
         .iommufd = container->be->fd,
-        .dev_cookie = (uint64_t)vbasedev,
     };
     struct vfio_device_attach_iommufd_pt attach_data = {
         .argsz = sizeof(attach_data),
@@ -285,6 +284,7 @@ static int vfio_device_attach_container(VFIODevice *vbasedev,
         return ret;
     }
 
+    printf("%s devid: %u\n", __func__, bind.out_devid);
     vbasedev->devid = bind.out_devid;
     trace_vfio_iommufd_bind_device(bind.iommufd, vbasedev->name,
                                    vbasedev->fd, vbasedev->devid);
