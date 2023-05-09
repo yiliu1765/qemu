@@ -2453,7 +2453,7 @@ out_single:
 }
 
 #ifdef CONFIG_IOMMUFD
-static VFIODevice *vfio_pci_iommufd_binded(__u32 dev_id)
+static VFIODevice *vfio_pci_iommufd_binded(__u32 devid)
 {
     VFIOAddressSpace *space;
     VFIOContainer *bcontainer;
@@ -2472,7 +2472,7 @@ static VFIODevice *vfio_pci_iommufd_binded(__u32 dev_id)
             }
             QLIST_FOREACH(hwpt, &container->hwpt_list, next) {
                 QLIST_FOREACH(vbasedev_iter, &hwpt->device_list, next) {
-                    if (dev_id == vbasedev_iter->devid) {
+                    if (devid == vbasedev_iter->devid) {
                         return vbasedev_iter;
                     }
                 }
@@ -2503,14 +2503,14 @@ static int vfio_pci_hot_reset_iommufd(VFIOPCIDevice *vdev, bool single)
         goto out_single;
     }
 
-    assert(info->flags & VFIO_PCI_HOT_RESET_FLAG_IOMMUFD_DEV_ID);
+    assert(info->flags & VFIO_PCI_HOT_RESET_FLAG_DEV_ID);
 
     devices = &info->devices[0];
 
-    if (!(info->flags & VFIO_PCI_HOT_RESET_FLAG_RESETTABLE)) {
+    if (!(info->flags & VFIO_PCI_HOT_RESET_FLAG_DEV_ID_OWNED)) {
         if (!vdev->has_pm_reset) {
             for (i = 0; i < info->count; i++) {
-                if (devices[i].dev_id == VFIO_PCI_DEVID_BLOCKING) {
+                if (devices[i].devid == VFIO_PCI_DEVID_NOT_OWNED) {
                     error_report("vfio: Cannot reset device %s, "
                                  "depends on device %04x:%02x:%02x.%x "
                                  "which is not owned.",
@@ -2534,21 +2534,21 @@ static int vfio_pci_hot_reset_iommufd(VFIOPCIDevice *vdev, bool single)
                                              devices[i].bus,
                                              PCI_SLOT(devices[i].devfn),
                                              PCI_FUNC(devices[i].devfn),
-                                             devices[i].dev_id);
+                                             devices[i].devid);
 
         /*
          * If a VFIO cdev device is resettable, all the dependent devices
          * are either bound to same iommufd or within same iommu_groups as
          * one of the iommufd bound devices.
          */
-        assert(devices[i].dev_id != VFIO_PCI_DEVID_BLOCKING);
+        assert(devices[i].devid != VFIO_PCI_DEVID_NOT_OWNED);
 
-        if (devices[i].dev_id == vdev->vbasedev.devid ||
-            devices[i].dev_id == VFIO_PCI_DEVID_NONBLOCKING) {
+        if (devices[i].devid == vdev->vbasedev.devid ||
+            devices[i].devid == VFIO_PCI_DEVID_OWNED) {
             continue;
         }
 
-        vbasedev_iter = vfio_pci_iommufd_binded(devices[i].dev_id);
+        vbasedev_iter = vfio_pci_iommufd_binded(devices[i].devid);
         if (!vbasedev_iter || !vbasedev_iter->dev->realized ||
             vbasedev_iter->type != VFIO_DEVICE_TYPE_PCI) {
             continue;
@@ -2584,12 +2584,12 @@ static int vfio_pci_hot_reset_iommufd(VFIOPCIDevice *vdev, bool single)
         VFIOPCIDevice *tmp;
         VFIODevice *vbasedev_iter;
 
-        if (devices[i].dev_id == vdev->vbasedev.devid ||
-            devices[i].dev_id == VFIO_PCI_DEVID_NONBLOCKING) {
+        if (devices[i].devid == vdev->vbasedev.devid ||
+            devices[i].devid == VFIO_PCI_DEVID_OWNED) {
             continue;
         }
 
-        vbasedev_iter = vfio_pci_iommufd_binded(devices[i].dev_id);
+        vbasedev_iter = vfio_pci_iommufd_binded(devices[i].devid);
         if (!vbasedev_iter || !vbasedev_iter->dev->realized ||
             vbasedev_iter->type != VFIO_DEVICE_TYPE_PCI) {
             continue;
