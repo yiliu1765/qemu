@@ -67,7 +67,7 @@ int iommufd_device_get_info(IOMMUFDDevice *idev,
     };
     int ret;
 
-    ret = ioctl(idev->iommufd, IOMMU_DEVICE_GET_HW_INFO, &info);
+    ret = ioctl(idev->iommufd, IOMMU_GET_HW_INFO, &info);
     if (ret) {
         error_report("Failed to get info %m");
     } else {

@@ -2543,27 +2543,17 @@ static void vtd_context_global_invalidate(IntelIOMMUState *s)
     vtd_pasid_cache_sync(s, &pc_info);
 }
 
-static void vtd_init_fl_hwpt_data(struct iommu_hwpt_intel_vtd *vtd,
-                                        VTDPASIDEntry *pe)
+static void vtd_init_fl_hwpt_data(struct iommu_hwpt_vtd_s1 *vtd,
+                                  VTDPASIDEntry *pe)
 {
     memset(vtd, 0, sizeof(*vtd));
 
     vtd->flags =  (VTD_SM_PASID_ENTRY_SRE_BIT(pe->val[2]) ?
-                                        IOMMU_VTD_PGTBL_SRE : 0) |
+                                        IOMMU_VTD_S1_SRE : 0) |
                   (VTD_SM_PASID_ENTRY_WPE_BIT(pe->val[2]) ?
-                                        IOMMU_VTD_PGTBL_WPE : 0) |
+                                        IOMMU_VTD_S1_WPE : 0) |
                   (VTD_SM_PASID_ENTRY_EAFE_BIT(pe->val[2]) ?
-                                        IOMMU_VTD_PGTBL_EAFE : 0) |
-                  (VTD_SM_PASID_ENTRY_PCD_BIT(pe->val[1]) ?
-                                        IOMMU_VTD_PGTBL_PCD : 0) |
-                  (VTD_SM_PASID_ENTRY_PWT_BIT(pe->val[1]) ?
-                                        IOMMU_VTD_PGTBL_PWT : 0) |
-                  (VTD_SM_PASID_ENTRY_EMTE_BIT(pe->val[1]) ?
-                                        IOMMU_VTD_PGTBL_EMTE : 0) |
-                  (VTD_SM_PASID_ENTRY_CD_BIT(pe->val[1]) ?
-                                        IOMMU_VTD_PGTBL_CD : 0);
-    vtd->pat = VTD_SM_PASID_ENTRY_PAT(pe->val[1]);
-    vtd->emt = VTD_SM_PASID_ENTRY_EMT(pe->val[1]);
+                                        IOMMU_VTD_S1_EAFE : 0);
     vtd->addr_width = vtd_pe_get_fl_aw(pe);
     vtd->pgtbl_addr = (uint64_t)vtd_pe_get_flpt_base(pe);
 }
@@ -2610,7 +2600,7 @@ static void vtd_put_s2_hwpt(IntelIOMMUState *s)
 static int vtd_init_fl_hwpt(IntelIOMMUState *s, VTDHwpt *hwpt,
                             IOMMUFDDevice *idev, VTDPASIDEntry *pe)
 {
-    struct iommu_hwpt_intel_vtd vtd;
+    struct iommu_hwpt_vtd_s1 vtd;
     uint32_t hwpt_id, s2_hwptid;
     int ret;
 
@@ -3974,7 +3964,7 @@ static bool vtd_process_pasid_desc(IntelIOMMUState *s,
  * Caller of this function should hold iommu_lock.
  */
 static void vtd_invalidate_piotlb(VTDPASIDAddressSpace *vtd_pasid_as,
-                                  struct iommu_hwpt_invalidate_intel_vtd *cache)
+                                  struct iommu_hwpt_vtd_s1_invalidate *cache)
 {
     VTDIOMMUFDDevice *vtd_idev;
     VTDHwpt *hwpt = &vtd_pasid_as->hwpt;
@@ -4038,8 +4028,8 @@ static void vtd_piotlb_pasid_invalidate(IntelIOMMUState *s,
                                         uint16_t domain_id,
                                         uint32_t pasid)
 {
-    struct iommu_hwpt_invalidate_request_intel_vtd *cache_info;
-    struct iommu_hwpt_invalidate_intel_vtd requests = { 0 };
+    struct iommu_hwpt_vtd_s1_invalidate_desc *cache_info;
+    struct iommu_hwpt_vtd_s1_invalidate s1_inv = { 0 };
     VTDPIOTLBInvInfo piotlb_info;
     VTDIOTLBPageInvInfo info;
     uint32_t request_nr = 1;
@@ -4051,15 +4041,15 @@ static void vtd_piotlb_pasid_invalidate(IntelIOMMUState *s,
     cache_info = g_malloc0(sizeof(*cache_info));
 
     cache_info->addr = 0;
-    cache_info->nb_pages = (uint64_t)-1;
+    cache_info->npages = (uint64_t)-1;
 
-    requests.entry_size = sizeof(struct iommu_hwpt_invalidate_request_intel_vtd);
-    requests.entry_nr_uptr = (uint64_t)&request_nr;
-    requests.inv_data_uptr = (uint64_t)cache_info;
+    s1_inv.entry_size = sizeof(struct iommu_hwpt_vtd_s1_invalidate_desc);
+    s1_inv.entry_nr_uptr = (uint64_t)&request_nr;
+    s1_inv.inv_data_uptr = (uint64_t)cache_info;
 
     piotlb_info.domain_id = domain_id;
     piotlb_info.pasid = pasid;
-    piotlb_info.inv_data = &requests;
+    piotlb_info.inv_data = &s1_inv;
 
     info.domain_id = domain_id;
     info.pasid = pasid;
@@ -4098,8 +4088,8 @@ static void vtd_piotlb_page_invalidate(IntelIOMMUState *s, uint16_t domain_id,
                                        uint32_t pasid, hwaddr addr, uint8_t am,
                                        bool ih)
 {
-    struct iommu_hwpt_invalidate_request_intel_vtd *cache_info;
-    struct iommu_hwpt_invalidate_intel_vtd requests = { 0 };
+    struct iommu_hwpt_vtd_s1_invalidate_desc *cache_info;
+    struct iommu_hwpt_vtd_s1_invalidate s1_inv = { 0 };
     VTDPIOTLBInvInfo piotlb_info;
     VTDIOTLBPageInvInfo info;
     uint32_t request_nr = 1;
@@ -4111,16 +4101,16 @@ static void vtd_piotlb_page_invalidate(IntelIOMMUState *s, uint16_t domain_id,
     cache_info = g_malloc0(sizeof(*cache_info));
 
     cache_info->addr = addr;
-    cache_info->nb_pages = 1 << am;
+    cache_info->npages = 1 << am;
     cache_info->flags = ih ? IOMMU_VTD_QI_FLAGS_LEAF : 0;
 
-    requests.entry_size = sizeof(struct iommu_hwpt_invalidate_request_intel_vtd);
-    requests.entry_nr_uptr = (uint64_t)&request_nr;
-    requests.inv_data_uptr = (uint64_t)cache_info;
+    s1_inv.entry_size = sizeof(struct iommu_hwpt_vtd_s1_invalidate_desc);
+    s1_inv.entry_nr_uptr = (uint64_t)&request_nr;
+    s1_inv.inv_data_uptr = (uint64_t)cache_info;
 
     piotlb_info.domain_id = domain_id;
     piotlb_info.pasid = pasid;
-    piotlb_info.inv_data = &requests;
+    piotlb_info.inv_data = &s1_inv;
 
     info.is_piotlb = true;
     info.domain_id = domain_id;

@@ -568,7 +568,7 @@ typedef struct VTDPASIDCacheInfo VTDPASIDCacheInfo;
 struct VTDPIOTLBInvInfo {
     uint16_t domain_id;
     uint32_t pasid;
-    struct iommu_hwpt_invalidate_intel_vtd *inv_data;
+    struct iommu_hwpt_vtd_s1_invalidate *inv_data;
 };
 typedef struct VTDPIOTLBInvInfo VTDPIOTLBInvInfo;
 
@@ -601,12 +601,6 @@ typedef struct VTDPIOTLBInvInfo VTDPIOTLBInvInfo;
 #define VTD_SM_PASID_ENTRY_SRE_BIT(val)  (!!((val) & 1ULL))
 #define VTD_SM_PASID_ENTRY_WPE_BIT(val)  (!!(((val) >> 4) & 1ULL))
 #define VTD_SM_PASID_ENTRY_EAFE_BIT(val) (!!(((val) >> 7) & 1ULL))
-#define VTD_SM_PASID_ENTRY_PCD_BIT(val)  (!!(((val) >> 31) & 1ULL))
-#define VTD_SM_PASID_ENTRY_PWT_BIT(val)  (!!(((val) >> 30) & 1ULL))
-#define VTD_SM_PASID_ENTRY_EMTE_BIT(val) (!!(((val) >> 26) & 1ULL))
-#define VTD_SM_PASID_ENTRY_CD_BIT(val)   (!!(((val) >> 25) & 1ULL))
-#define VTD_SM_PASID_ENTRY_PAT(val)      (((val) >> 32) & 0xFFFFFFFFULL)
-#define VTD_SM_PASID_ENTRY_EMT(val)      (((val) >> 27) & 0x7ULL)
 
 #define VTD_PASID_IOTLB_MAX_SIZE          1024    /* Max size of the hash table */
 
