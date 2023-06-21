@@ -2562,6 +2562,7 @@ static void vtd_init_fl_hwpt_data(struct iommu_hwpt_vtd_s1 *vtd,
 static int vtd_get_s2_hwpt(IntelIOMMUState *s, IOMMUFDDevice *idev,
                            uint32_t *s2_hwpt)
 {
+    struct iommu_resv_iova_range *resv;
     int ret;
 
     if (s->s2_hwpt) {
@@ -2579,6 +2580,11 @@ static int vtd_get_s2_hwpt(IntelIOMMUState *s, IOMMUFDDevice *idev,
         s->s2_hwpt->parent_id = idev->ioas_id;
         s->s2_hwpt->users = 1;
     }
+
+    iommufd_device_get_resv_iova(idev, &resv);
+    printf("%s resv->start: %llx, last: %llx\n", __func__, resv->start, resv->last);
+    g_free(resv);
+
     return ret;
 }
 
