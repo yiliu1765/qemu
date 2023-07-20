@@ -678,7 +678,49 @@ static int vfio_iommufd_device_detach_hwpt(IOMMUFDDevice *idev)
     return ret;
 }
 
+static int vfio_iommufd_device_pasid_attach_hwpt(IOMMUFDDevice *idev,
+                                                 uint32_t pasid,
+                                                 uint32_t hwpt_id)
+{
+    VFIODevice *vbasedev = container_of(idev, VFIODevice, idev);
+    struct vfio_device_pasid_attach_iommufd_pt attach = {
+        .argsz = sizeof(attach),
+        .flags = 0,
+        .pasid = pasid,
+        .pt_id = hwpt_id,
+    };
+    int ret;
+
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_PASID_ATTACH_IOMMUFD_PT, &attach);
+    if (ret) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
+static int vfio_iommufd_device_pasid_detach_hwpt(IOMMUFDDevice *idev,
+                                                 uint32_t pasid)
+{
+    VFIODevice *vbasedev = container_of(idev, VFIODevice, idev);
+    struct vfio_device_pasid_detach_iommufd_pt detach = {
+        .argsz = sizeof(detach),
+        .pasid = pasid,
+        .flags = 0,
+    };
+    int ret;
+
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_PASID_DETACH_IOMMUFD_PT, &detach);
+    if (ret) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
 static IOMMUFDDeviceOps vfio_iommufd_device_ops = {
     .attach_hwpt = vfio_iommufd_device_attach_hwpt,
     .detach_hwpt = vfio_iommufd_device_detach_hwpt,
+    .pasid_attach_hwpt = vfio_iommufd_device_pasid_attach_hwpt,
+    .pasid_detach_hwpt = vfio_iommufd_device_pasid_detach_hwpt,
 };
