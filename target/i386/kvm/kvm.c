@@ -3515,6 +3515,10 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
                               env->msr_xfd_err);
         }
 
+        if (env->features[FEAT_7_0_ECX] & CPUID_7_0_ECX_ENQCMD) {
+            kvm_msr_entry_add(cpu, MSR_IA32_PASID, env->msr_pasid);
+        }
+
         if (kvm_enabled() && cpu->enable_pmu &&
             (env->features[FEAT_7_0_EDX] & CPUID_7_0_EDX_ARCH_LBR)) {
             uint64_t depth;
@@ -3918,6 +3922,10 @@ static int kvm_get_msrs(X86CPU *cpu)
         kvm_msr_entry_add(cpu, MSR_IA32_XFD_ERR, 0);
     }
 
+    if (env->features[FEAT_7_0_ECX] & CPUID_7_0_ECX_ENQCMD) {
+        kvm_msr_entry_add(cpu, MSR_IA32_PASID, 0);
+    }
+
     if (kvm_enabled() && cpu->enable_pmu &&
         (env->features[FEAT_7_0_EDX] & CPUID_7_0_EDX_ARCH_LBR)) {
         uint64_t depth;
@@ -4047,6 +4055,9 @@ static int kvm_get_msrs(X86CPU *cpu)
             break;
         case MSR_IA32_BNDCFGS:
             env->msr_bndcfgs = msrs[i].data;
+            break;
+        case MSR_IA32_PASID:
+            env->msr_pasid = msrs[i].data;
             break;
         case MSR_IA32_XSS:
             env->xss = msrs[i].data;

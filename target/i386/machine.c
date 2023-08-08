@@ -980,6 +980,25 @@ static const VMStateDescription vmstate_avx512 = {
     }
 };
 
+static bool msr_pasid_needed(void *opaque)
+{
+    X86CPU *cpu = opaque;
+    CPUX86State *env = &cpu->env;
+
+    return !!(env->features[FEAT_7_0_ECX] & CPUID_7_0_ECX_ENQCMD);
+}
+
+static const VMStateDescription vmstate_msr_pasid = {
+    .name = "cpu/msr_pasid",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = msr_pasid_needed,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT64(env.msr_pasid, X86CPU),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static bool xss_needed(void *opaque)
 {
     X86CPU *cpu = opaque;
@@ -1722,6 +1741,7 @@ const VMStateDescription vmstate_x86_cpu = {
         &vmstate_msr_hyperv_stimer,
         &vmstate_msr_hyperv_reenlightenment,
         &vmstate_avx512,
+        &vmstate_msr_pasid,
         &vmstate_xss,
         &vmstate_umwait,
         &vmstate_tsc_khz,

@@ -523,6 +523,7 @@ typedef enum X86Seg {
 #define MSR_IA32_XFD_ERR                0x000001c5
 
 #define MSR_IA32_BNDCFGS                0x00000d90
+#define MSR_IA32_PASID                  0x00000d93
 #define MSR_IA32_XSS                    0x00000da0
 #define MSR_IA32_UMWAIT_CONTROL         0xe1
 
@@ -1766,6 +1767,9 @@ typedef struct CPUArchState {
     uint64_t msr_lbr_ctl;
     uint64_t msr_lbr_depth;
     LBREntry lbr_records[ARCH_LBR_NR_ENTRIES];
+
+    /* Per-VCPU IA32_PASID MSRs */
+    uint64_t msr_pasid;
 
     /* exception/interrupt handling */
     int error_code;
