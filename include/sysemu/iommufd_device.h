@@ -75,8 +75,6 @@ int iommufd_device_pasid_detach_hwpt(IOMMUFDDevice *idev, uint32_t pasid);
 int iommufd_device_get_info(IOMMUFDDevice *idev,
                             enum iommu_hw_info_type *type,
                             uint32_t len, void *data);
-int iommufd_device_get_resv_iova(IOMMUFDDevice *idev,
-                                 struct iommu_resv_iova_range **resv);
 void iommufd_device_init(void *_idev, size_t instance_size,
                          const char *mrtypename, IOMMUFDBackend *iommufd,
                          uint32_t dev_id);

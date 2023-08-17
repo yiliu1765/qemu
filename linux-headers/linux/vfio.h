@@ -1011,8 +1011,8 @@ struct vfio_device_pasid_attach_iommufd_pt {
  * @pasid:	The pasid to be detached.
  *
  * Remove the association of a pasid (within a cdev device) and its current
- * associated address space.  After it, the device should be in a blocking
- * DMA state.  This is only allowed on cdev fds.
+ * associated address space.  After it, the pasid of the device should be in
+ * a blocking DMA state.  This is only allowed on cdev fds.
  *
  * Return: 0 on success, -errno on failure.
  */

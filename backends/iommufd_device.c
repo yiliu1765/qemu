@@ -104,39 +104,6 @@ int iommufd_device_get_info(IOMMUFDDevice *idev,
     return ret;
 }
 
-/* Caller needs to free the resv pointer */
-int iommufd_device_get_resv_iova(IOMMUFDDevice *idev,
-                                 struct iommu_resv_iova_range **resv)
-{
-    struct iommu_resv_iova_ranges ranges = {
-        .size = sizeof(ranges),
-        .dev_id = idev->dev_id,
-        .__reserved = 0,
-    };
-    struct iommu_resv_iova_range *iovas;
-    int ret;
-
-    iovas = g_new0(struct iommu_resv_iova_range, 1);
-    ranges.resv_iovas = (uint64_t)iovas;
-    ranges.num_iovas = 1;
-again:
-
-    ret = ioctl(idev->iommufd->fd, IOMMU_RESV_IOVA_RANGES, &ranges);
-    if (ret) {
-        if (errno == -EMSGSIZE) {
-            iovas = g_realloc(iovas, ranges.num_iovas*sizeof(*iovas));
-            ranges.resv_iovas = (uint64_t)iovas;
-            goto again;
-        }
-        error_report("Failed to get resve iovas %m");
-    } else {
-        *resv = iovas;
-	printf("num_iovas: %u\n", ranges.num_iovas);
-    }
-
-    return ret;
-}
-
 void iommufd_device_init(void *_idev, size_t instance_size,
                          const char *mrtypename, IOMMUFDBackend *iommufd,
                          uint32_t dev_id)
