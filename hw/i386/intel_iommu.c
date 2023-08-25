@@ -2763,7 +2763,7 @@ static void vtd_ioas_container_destroy(VTDIOASContainer *container)
     g_free(container);
 }
 
-static int vtd_device_attach_hwpt(VTDIOMMUFDDevice *vtd_idev,
+static int vtd_device_attach_hwpt(VTDIOMMUFDDevice *vtd_idev, uint32_t pasid,
                                   uint32_t rid_pasid, VTDPASIDEntry *pe,
                                   VTDS2Hwpt *s2_hwpt, VTDHwpt *hwpt,
                                   Error **errp)
@@ -2781,15 +2781,19 @@ static int vtd_device_attach_hwpt(VTDIOMMUFDDevice *vtd_idev,
         hwpt->hwpt_id = s2_hwpt->hwpt_id;
     }
 
-    ret = iommufd_device_attach_hwpt(idev, hwpt->hwpt_id);
-    trace_vtd_device_attach_hwpt(idev->dev_id, rid_pasid, hwpt->hwpt_id, ret);
+    if (pasid == rid_pasid) {
+        ret = iommufd_device_attach_hwpt(idev, hwpt->hwpt_id);
+    } else {
+        ret = iommufd_device_pasid_attach_hwpt(idev, pasid, hwpt->hwpt_id);
+    }
+    trace_vtd_device_attach_hwpt(idev->dev_id, pasid, hwpt->hwpt_id, ret);
     if (ret) {
         if (vtd_pe_pgtt_is_flt(pe)) {
             vtd_destroy_fl_hwpt(idev, hwpt);
         }
         hwpt->hwpt_id = 0;
         error_setg(errp, "dev_id %d pasid %d failed to attach hwpt %d",
-                   idev->dev_id, rid_pasid, hwpt->hwpt_id);
+                   idev->dev_id, pasid, hwpt->hwpt_id);
         return ret;
     }
 
@@ -2799,14 +2803,17 @@ static int vtd_device_attach_hwpt(VTDIOMMUFDDevice *vtd_idev,
     return 0;
 }
 
-static void vtd_device_detach_hwpt(VTDIOMMUFDDevice *vtd_idev,
+static void vtd_device_detach_hwpt(VTDIOMMUFDDevice *vtd_idev, uint32_t pasid,
                                    uint32_t rid_pasid, VTDPASIDEntry *pe,
                                    VTDHwpt *hwpt, Error **errp)
 {
     IOMMUFDDevice *idev = vtd_idev->idev;
     int ret;
 
-    if (vtd_idev->iommu_state->dmar_enabled) {
+    if (pasid != rid_pasid) {
+        ret = iommufd_device_pasid_detach_hwpt(idev, pasid);
+        trace_vtd_device_detach_hwpt(idev->dev_id, pasid, ret);
+    } else if (vtd_idev->iommu_state->dmar_enabled) {
         ret = iommufd_device_detach_hwpt(idev);
         trace_vtd_device_detach_hwpt(idev->dev_id, rid_pasid, ret);
     } else {
@@ -2831,6 +2838,7 @@ static void vtd_device_detach_hwpt(VTDIOMMUFDDevice *vtd_idev,
 
 static int vtd_device_attach_container(VTDIOMMUFDDevice *vtd_idev,
                                        VTDIOASContainer *container,
+                                       uint32_t pasid,
                                        uint32_t rid_pasid,
                                        VTDPASIDEntry *pe,
                                        VTDHwpt *hwpt,
@@ -2845,7 +2853,7 @@ static int vtd_device_attach_container(VTDIOMMUFDDevice *vtd_idev,
 
     /* try to attach to an existing hwpt in this container */
     QLIST_FOREACH(s2_hwpt, &container->hwpt_list, next) {
-        ret = vtd_device_attach_hwpt(vtd_idev, rid_pasid, pe,
+        ret = vtd_device_attach_hwpt(vtd_idev, pasid, rid_pasid, pe,
                                      s2_hwpt, hwpt, &err);
         if (ret) {
             const char *msg = error_get_pretty(err);
@@ -2871,13 +2879,14 @@ static int vtd_device_attach_container(VTDIOMMUFDDevice *vtd_idev,
     s2_hwpt = vtd_ioas_container_get_hwpt(container, hwpt_id);
 
     /* Attach vtd device to a new allocated hwpt within iommufd */
-    ret = vtd_device_attach_hwpt(vtd_idev, rid_pasid, pe, s2_hwpt, hwpt, &err);
+    ret = vtd_device_attach_hwpt(vtd_idev, pasid, rid_pasid, pe,
+                                 s2_hwpt, hwpt, &err);
     if (ret) {
         goto err_attach_hwpt;
     }
 
 found_hwpt:
-    trace_vtd_device_attach_container(iommufd->fd, idev->dev_id, rid_pasid,
+    trace_vtd_device_attach_container(iommufd->fd, idev->dev_id, pasid,
                                       container->ioas_id, hwpt->hwpt_id);
     return 0;
 
@@ -2887,6 +2896,7 @@ err_attach_hwpt:
 }
 
 static void vtd_device_detach_container(VTDIOMMUFDDevice *vtd_idev,
+                                        uint32_t pasid,
                                         uint32_t rid_pasid,
                                         VTDPASIDEntry *pe,
                                         VTDHwpt *hwpt,
@@ -2896,12 +2906,13 @@ static void vtd_device_detach_container(VTDIOMMUFDDevice *vtd_idev,
     IOMMUFDBackend *iommufd = idev->iommufd;
     VTDS2Hwpt *s2_hwpt = hwpt->s2_hwpt;
 
-    trace_vtd_device_detach_container(iommufd->fd, idev->dev_id, rid_pasid);
-    vtd_device_detach_hwpt(vtd_idev, rid_pasid, pe, hwpt, errp);
+    trace_vtd_device_detach_container(iommufd->fd, idev->dev_id, pasid);
+    vtd_device_detach_hwpt(vtd_idev, pasid, rid_pasid, pe, hwpt, errp);
     vtd_ioas_container_put_hwpt(s2_hwpt);
 }
 
 static int vtd_device_attach_iommufd(VTDIOMMUFDDevice *vtd_idev,
+                                     uint32_t pasid,
                                      uint32_t rid_pasid,
                                      VTDPASIDEntry *pe,
                                      VTDHwpt *hwpt,
@@ -2921,7 +2932,7 @@ static int vtd_device_attach_iommufd(VTDIOMMUFDDevice *vtd_idev,
             continue;
         }
 
-        if (vtd_device_attach_container(vtd_idev, container,
+        if (vtd_device_attach_container(vtd_idev, container, pasid,
                                         rid_pasid, pe, hwpt, &err)) {
             const char *msg = error_get_pretty(err);
 
@@ -2947,7 +2958,7 @@ static int vtd_device_attach_iommufd(VTDIOMMUFDDevice *vtd_idev,
     container->errata = vtd_idev->errata;
     QLIST_INIT(&container->hwpt_list);
 
-    if (vtd_device_attach_container(vtd_idev, container,
+    if (vtd_device_attach_container(vtd_idev, container, pasid,
                                     rid_pasid, pe, hwpt, errp)) {
         goto err_attach_container;
     }
@@ -2967,7 +2978,7 @@ static int vtd_device_attach_iommufd(VTDIOMMUFDDevice *vtd_idev,
     return 0;
 
 err_listener_register:
-    vtd_device_detach_container(vtd_idev, rid_pasid, pe, hwpt, errp);
+    vtd_device_detach_container(vtd_idev, pasid, rid_pasid, pe, hwpt, errp);
 err_attach_container:
     iommufd_backend_free_id(iommufd, container->ioas_id);
     g_free(container);
@@ -2975,6 +2986,7 @@ err_attach_container:
 }
 
 static void vtd_device_detach_iommufd(VTDIOMMUFDDevice *vtd_idev,
+                                      uint32_t pasid,
                                       uint32_t rid_pasid,
                                       VTDPASIDEntry *pe,
                                       VTDHwpt *hwpt,
@@ -2982,7 +2994,7 @@ static void vtd_device_detach_iommufd(VTDIOMMUFDDevice *vtd_idev,
 {
     VTDIOASContainer *container = hwpt->s2_hwpt->container;
 
-    vtd_device_detach_container(vtd_idev, rid_pasid, pe, hwpt, errp);
+    vtd_device_detach_container(vtd_idev, pasid, rid_pasid, pe, hwpt, errp);
     vtd_ioas_container_destroy(container);
 }
 
@@ -3005,8 +3017,8 @@ static int vtd_device_attach_pgtbl(VTDIOMMUFDDevice *vtd_idev,
         return -EINVAL;
     }
 
-    return vtd_device_attach_iommufd(vtd_idev, rid_pasid, pe,
-                                     &vtd_pasid_as->hwpt, &error_abort);
+    return vtd_device_attach_iommufd(vtd_idev, vtd_pasid_as->pasid, rid_pasid,
+                                     pe, &vtd_pasid_as->hwpt, &error_abort);
 }
 
 static int vtd_device_detach_pgtbl(VTDIOMMUFDDevice *vtd_idev,
@@ -3021,8 +3033,8 @@ static int vtd_device_detach_pgtbl(VTDIOMMUFDDevice *vtd_idev,
         return 0;
     }
 
-    vtd_device_detach_iommufd(vtd_idev, rid_pasid, cached_pe,
-                              &vtd_pasid_as->hwpt, &error_abort);
+    vtd_device_detach_iommufd(vtd_idev, vtd_pasid_as->pasid, rid_pasid,
+                              cached_pe, &vtd_pasid_as->hwpt, &error_abort);
 
     return 0;
 }
@@ -3080,11 +3092,6 @@ static int vtd_bind_guest_pasid(VTDPASIDAddressSpace *vtd_pasid_as,
     if (vtd_dev_get_rid2pasid(s, pci_bus_num(vtd_pasid_as->bus),
                               devfn, &rid_pasid)) {
         error_report("Unable to get rid_pasid for devfn: %d!", devfn);
-        return ret;
-    }
-
-    if (vtd_pasid_as->pasid != rid_pasid) {
-        error_report("Non-rid_pasid %d not supported yet", vtd_pasid_as->pasid);
         return ret;
     }
 
