@@ -2803,11 +2803,6 @@ static int vtd_device_attach_pgtbl(VTDIOMMUFDDevice *vtd_idev,
         if (ret) {
             goto out;
         }
-        /* FIXME: for testing, detach the hwpt from pasid #300 as well */
-        ret = iommufd_device_pasid_detach_hwpt(idev, 300);
-        if (ret) {
-            goto out;
-        }
         if (!update) {
             vtd_idev->default_hwpt_detached = true;
         }
@@ -2815,9 +2810,6 @@ static int vtd_device_attach_pgtbl(VTDIOMMUFDDevice *vtd_idev,
     printf("%s, try to bind PASID %u to hwpt: %u - 1\n", __func__, vtd_pasid_as->pasid, hwpt->hwpt_id);
     ret = iommufd_device_attach_hwpt(idev, hwpt->hwpt_id);
     printf("%s, try to bind PASID %u - 2, ret: %d\n", __func__, vtd_pasid_as->pasid, ret);
-    /* FIXME: for testing, attach the hwpt to pasid #300 as well */
-    ret = iommufd_device_pasid_attach_hwpt(idev, 300, hwpt->hwpt_id);
-
 out:
     if (ret) {
         if (vtd_pe_pgtt_is_flt(pe)) {
@@ -2851,13 +2843,6 @@ static int vtd_device_detach_pgtbl(IOMMUFDDevice *idev,
     printf("%s, try to unbind PASID %u - 1\n", __func__, vtd_pasid_as->pasid);
     ret = iommufd_device_detach_hwpt(idev);
     printf("%s, try to unbind PASID %u - 2, ret: %d\n", __func__, vtd_pasid_as->pasid, ret);
-    if (ret) {
-        return ret;
-    }
-
-    /* FIXME: for testing, detach the hwpt from pasid #300 as well */
-    ret = iommufd_device_pasid_detach_hwpt(idev, 300);
-
     if (!ret) {
         if (vtd_pe_pgtt_is_flt(cached_pe)) {
             vtd_destroy_fl_hwpt(idev, hwpt);
