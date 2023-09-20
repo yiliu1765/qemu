@@ -280,6 +280,7 @@ static int vfio_device_attach_container(VFIODevice *vbasedev,
         .pt_id = container->ioas_id,
     };
     VFIOIOASHwpt *hwpt;
+    uint32_t hwptid;
     int ret;
 
     /*
@@ -301,6 +302,21 @@ static int vfio_device_attach_container(VFIODevice *vbasedev,
     vbasedev->devid = bind.out_devid;
     trace_vfio_iommufd_bind_device(bind.iommufd, vbasedev->name,
                                    vbasedev->fd, vbasedev->devid);
+
+    ret = iommufd_backend_alloc_hwpt(bind.iommufd, bind.out_devid,
+                                     container->ioas_id, 0,
+				     IOMMU_HWPT_TYPE_DEFAULT,
+                                     0, NULL, &hwptid);
+    if (ret) {
+        vfio_kvm_device_del_device(vbasedev);
+        error_setg_errno(errp, errno,
+                         "[iommufd=%d] error alloc hwpt linked to ioasid=%d",
+                         container->be->fd, attach_data.pt_id);
+        return ret;
+
+    }
+
+    attach_data.pt_id = hwptid;
 
     /* Attach device to an ioas within iommufd */
     ret = ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOMMUFD_PT, &attach_data);
