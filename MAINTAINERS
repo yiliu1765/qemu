@@ -2156,6 +2156,9 @@ M: Eric Auger <eric.auger@redhat.com>
 S: Supported
 F: backends/iommufd.c
 F: include/sysemu/iommufd.h
+F: include/qemu/chardev_open.h
+F: util/chardev_open.c
+
 
 vhost
 M: Michael S. Tsirkin <mst@redhat.com>
