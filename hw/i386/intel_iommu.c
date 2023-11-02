@@ -27,6 +27,7 @@
 #include "intel_iommu_internal.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_bus.h"
+#include "hw/vfio/pci.h"
 #include "hw/qdev-properties.h"
 #include "hw/i386/pc.h"
 #include "hw/i386/apic-msidef.h"
@@ -5682,6 +5683,35 @@ static bool vtd_check_idev(IntelIOMMUState *s, IOMMUFDDevice *idev,
     return passed;
 }
 
+/*
+ * VFIO device under modern vIOMMU doesn't switch address space.
+ * If there is emulated device under same group which requires,
+ * there is a conflict. We strictly disallow VFIO device under
+ * PCI bridge to avoid this case for now.
+ */
+static bool allow_iommufd_dev_under_pci_bridge(IOMMUFDDevice *idev)
+{
+#ifdef CONFIG_IOMMUFD
+    VFIODevice *vbasedev = container_of(idev, VFIODevice, idev);
+    VFIOPCIDevice *vdev = VFIO_PCI(vbasedev->dev);
+    PCIDevice *dev = &vdev->pdev;
+    PCIBus *parent_bus = pci_get_bus(dev);
+
+    if (!vdev) {
+        return true;
+    }
+
+    while (parent_bus && parent_bus->parent_dev) {
+        if (!pci_bus_is_express(parent_bus) &&
+            vbasedev->iommufd) {
+            return false;
+        }
+        parent_bus = pci_get_bus(parent_bus->parent_dev);
+    }
+#endif
+    return true;
+}
+
 static int vtd_dev_set_iommu_device(PCIBus *bus, void *opaque, int32_t devfn,
                                     IOMMUFDDevice *idev, Error **errp)
 {
@@ -5709,6 +5739,11 @@ static int vtd_dev_set_iommu_device(PCIBus *bus, void *opaque, int32_t devfn,
     if (!vtd_check_idev(s, idev, errp)) {
         vtd_iommu_unlock(s);
         return -ENOENT;
+    }
+
+    if (!allow_iommufd_dev_under_pci_bridge(idev)) {
+        vtd_iommu_unlock(s);
+        return -EINVAL;
     }
 
     vtd_idev = g_hash_table_lookup(s->vtd_iommufd_dev, &key);
