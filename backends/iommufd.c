@@ -219,26 +219,61 @@ int iommufd_backend_unmap_dma(IOMMUFDBackend *be, uint32_t ioas_id,
 }
 
 int iommufd_backend_alloc_hwpt(int iommufd, uint32_t dev_id,
-                               uint32_t pt_id, uint32_t *out_hwpt)
+                               uint32_t pt_id, uint32_t flags,
+                               uint32_t data_type, uint32_t data_len,
+                               void *data_ptr, uint32_t *out_hwpt)
 {
     int ret;
     struct iommu_hwpt_alloc alloc_hwpt = {
         .size = sizeof(struct iommu_hwpt_alloc),
-        .flags = 0,
+        .flags = flags,
         .dev_id = dev_id,
         .pt_id = pt_id,
+        .data_type = data_type,
+        .data_len = data_len,
+        .data_uptr = (uint64_t)data_ptr,
         .__reserved = 0,
     };
 
     ret = ioctl(iommufd, IOMMU_HWPT_ALLOC, &alloc_hwpt);
-    trace_iommufd_backend_alloc_hwpt(iommufd, dev_id, pt_id,
+    trace_iommufd_backend_alloc_hwpt(iommufd, dev_id, pt_id, flags, data_type,
+                                     data_len, (uint64_t)data_ptr,
                                      alloc_hwpt.out_hwpt_id, ret);
-
     if (ret) {
         error_report("IOMMU_HWPT_ALLOC failed: %m");
     } else {
         *out_hwpt = alloc_hwpt.out_hwpt_id;
     }
+    return !ret ? 0 : -errno;
+}
+
+int iommufd_backend_invalidate_cache(int iommufd, uint32_t hwpt_id,
+                                     uint32_t req_type, uint32_t req_len,
+                                     uint32_t *req_num, void *reqs_ptr)
+{
+    int ret;
+    struct iommu_hwpt_invalidate cache = {
+        .size = sizeof(cache),
+        .hwpt_id = hwpt_id,
+        .req_type = req_type,
+        .req_len = req_len,
+        .reqs_uptr = (uint64_t)reqs_ptr,
+    };
+
+    if (!req_num) {
+        error_report("IOMMU_HWPT_INVALIDATE failed: missing req_num input");
+        return -EINVAL;
+    }
+
+    cache.req_num = *req_num;
+    ret = ioctl(iommufd, IOMMU_HWPT_INVALIDATE, &cache);
+    if (ret) {
+        error_report("IOMMU_HWPT_INVALIDATE failed: %s", strerror(errno));
+    }
+    *req_num = cache.req_num;
+    trace_iommufd_backend_invalidate_cache(iommufd, hwpt_id, req_type, req_len,
+                                           *req_num, cache.req_num,
+                                           (uint64_t)reqs_ptr, ret);
     return !ret ? 0 : -errno;
 }
 
