@@ -208,6 +208,7 @@
                                      VTD_ECAP_EAFS)
 #define VTD_GET_PSS(val)            (((val) >> 35) & 0x1f)
 #define VTD_ECAP_PSS_MASK           (0x1fULL << 35)
+#define VTD_ECAP_PSS_MAX            19
 
 /* CAP_REG */
 /* (offset >> 4) << 24 */
