@@ -2316,7 +2316,8 @@ static void vtd_context_global_invalidate(IntelIOMMUState *s)
     vtd_iommu_replay_all(s);
 }
 
-static bool iommufd_listener_skipped_section(MemoryRegionSection *section)
+static bool iommufd_listener_skipped_section(VTDIOASContainer *container,
+                                             MemoryRegionSection *section)
 {
     return !memory_region_is_ram(section->mr) ||
            memory_region_is_protected(section->mr) ||
@@ -2326,7 +2327,8 @@ static bool iommufd_listener_skipped_section(MemoryRegionSection *section)
             * are never accessed by the CPU and beyond the address width of
             * some IOMMU hardware.  TODO: VFIO should tell us the IOMMU width.
             */
-           section->offset_within_address_space & (1ULL << 63);
+           section->offset_within_address_space & (1ULL << 63) ||
+           (container->errata && section->readonly);
 }
 
 static void iommufd_listener_region_add_s2domain(MemoryListener *listener,
@@ -2342,7 +2344,7 @@ static void iommufd_listener_region_add_s2domain(MemoryListener *listener,
     Error *err = NULL;
     int ret;
 
-    if (iommufd_listener_skipped_section(section)) {
+    if (iommufd_listener_skipped_section(container, section)) {
         return;
     }
     iova = REAL_HOST_PAGE_ALIGN(section->offset_within_address_space);
@@ -2393,7 +2395,7 @@ static void iommufd_listener_region_del_s2domain(MemoryListener *listener,
     Int128 llend, llsize;
     int ret;
 
-    if (iommufd_listener_skipped_section(section)) {
+    if (iommufd_listener_skipped_section(container, section)) {
         return;
     }
     iova = REAL_HOST_PAGE_ALIGN(section->offset_within_address_space);
@@ -2663,7 +2665,8 @@ static int vtd_device_attach_iommufd(VTDHostIOMMUDevice *vtd_hdev,
 
     /* try to attach to an existing container in this space */
     QLIST_FOREACH(container, &s->containers, next) {
-        if (container->iommufd != iommufd) {
+        if (container->iommufd != iommufd ||
+            container->errata != idev->errata) {
             continue;
         }
 
@@ -2690,6 +2693,7 @@ static int vtd_device_attach_iommufd(VTDHostIOMMUDevice *vtd_hdev,
     container = g_malloc0(sizeof(*container));
     container->iommufd = iommufd;
     container->ioas_id = ioas_id;
+    container->errata = idev->errata;
     QLIST_INIT(&container->s2_hwpt_list);
 
     if (vtd_device_attach_container(vtd_hdev, container,
@@ -5368,6 +5372,8 @@ static int vtd_check_iommufd_hdev(IntelIOMMUState *s,
         error_setg(errp, "Need nested translation on host in modern mode");
         return -EINVAL;
     }
+
+    idev->errata = vtd.flags & IOMMU_HW_INFO_VTD_ERRATA_772415_SPR17;
 
     if (s->cap_frozen) {
         return vtd_check_iommufd_hdev_frozen(s, &vtd, errp);

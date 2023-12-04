@@ -57,6 +57,7 @@ typedef struct IOMMUFDDevice {
     uint32_t devid;
     IOMMUFDDeviceOps *ops;
     uint32_t ioas_id;
+    uint32_t errata;
 } IOMMUFDDevice;
 
 struct IOMMUFDDeviceOps {
