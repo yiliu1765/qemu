@@ -19,6 +19,9 @@ typedef struct IOMMUFDDevice IOMMUFDDevice;
 typedef struct IOMMUFDDeviceOps {
     int (*attach_hwpt)(IOMMUFDDevice *idev, uint32_t hwpt_id);
     int (*detach_hwpt)(IOMMUFDDevice *idev);
+    int (*pasid_attach_hwpt)(IOMMUFDDevice *idev, uint32_t pasid,
+                             uint32_t hwpt_id);
+    int (*pasid_detach_hwpt)(IOMMUFDDevice *idev, uint32_t pasid);
 } IOMMUFDDeviceOps;
 
 /* This is an abstraction of host IOMMUFD device */
@@ -32,6 +35,9 @@ struct IOMMUFDDevice {
 
 int iommufd_device_attach_hwpt(IOMMUFDDevice *idev, uint32_t hwpt_id);
 int iommufd_device_detach_hwpt(IOMMUFDDevice *idev);
+int iommufd_device_pasid_attach_hwpt(IOMMUFDDevice *idev, uint32_t pasid,
+                                     uint32_t hwpt_id);
+int iommufd_device_pasid_detach_hwpt(IOMMUFDDevice *idev, uint32_t pasid);
 int iommufd_device_get_info(IOMMUFDDevice *idev,
                             enum iommu_hw_info_type *type,
                             uint32_t len, void *data);
