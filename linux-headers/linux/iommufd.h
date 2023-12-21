@@ -391,33 +391,13 @@ struct iommu_hwpt_vtd_s1 {
 };
 
 /**
- * struct iommu_hwpt_arm_smmuv3 - ARM SMMUv3 Context Descriptor Table info
- *                                (IOMMU_HWPT_DATA_ARM_SMMUV3)
- *
- * @ste: The first two double words of the user space Stream Table Entry for
- *       a user stage-1 Context Descriptor Table. Must be little-endian.
- *       Allowed fields: (Refer to "5.2 Stream Table Entry" in SMMUv3 HW Spec)
- *       - word-0: V, S1Fmt, S1ContextPtr, S1CDMax
- *       - word-1: S1DSS, S1CIR, S1COR, S1CSH, S1STALLD
- * @sid: The user space Stream ID to index the user Stream Table Entry @ste
- *
- * -EIO will be returned if @ste is not legal or contains any non-allowed field.
- */
-struct iommu_hwpt_arm_smmuv3 {
-	__aligned_le64 ste[2];
-	__u32 sid;
-};
-
-/**
  * enum iommu_hwpt_data_type - IOMMU HWPT Data Type
  * @IOMMU_HWPT_DATA_NONE: no data
  * @IOMMU_HWPT_DATA_VTD_S1: Intel VT-d stage-1 page table
- * @IOMMU_HWPT_DATA_ARM_SMMUV3: ARM SMMUv3 Context Descriptor Table
  */
 enum iommu_hwpt_data_type {
 	IOMMU_HWPT_DATA_NONE,
 	IOMMU_HWPT_DATA_VTD_S1,
-	IOMMU_HWPT_DATA_ARM_SMMUV3,
 };
 
 /**
@@ -496,41 +476,14 @@ struct iommu_hw_info_vtd {
 };
 
 /**
- * struct iommu_hw_info_arm_smmuv3 - ARM SMMUv3 hardware information
- *                                   (IOMMU_HW_INFO_TYPE_ARM_SMMUV3)
- *
- * @flags: Must be set to 0
- * @__reserved: Must be 0
- * @idr: Implemented features for ARM SMMU Non-secure programming interface
- * @iidr: Information about the implementation and implementer of ARM SMMU,
- *        and architecture version supported
- * @aidr: ARM SMMU architecture version
- *
- * For the details of @idr, @iidr and @aidr, please refer to the chapters
- * from 6.3.1 to 6.3.6 in the SMMUv3 Spec.
- *
- * User space should read the underlying ARM SMMUv3 hardware information for
- * the list of supported features.
- */
-struct iommu_hw_info_arm_smmuv3 {
-	__u32 flags;
-	__u32 __reserved;
-	__u32 idr[6];
-	__u32 iidr;
-	__u32 aidr;
-};
-
-/**
  * enum iommu_hw_info_type - IOMMU Hardware Info Types
  * @IOMMU_HW_INFO_TYPE_NONE: Used by the drivers that do not report hardware
  *                           info
  * @IOMMU_HW_INFO_TYPE_INTEL_VTD: Intel VT-d iommu info type
- * @IOMMU_HW_INFO_TYPE_ARM_SMMUV3: ARM SMMUv3 iommu info type
  */
 enum iommu_hw_info_type {
 	IOMMU_HW_INFO_TYPE_NONE,
 	IOMMU_HW_INFO_TYPE_INTEL_VTD,
-	IOMMU_HW_INFO_TYPE_ARM_SMMUV3,
 };
 
 /**
@@ -662,6 +615,15 @@ struct iommu_hwpt_get_dirty_bitmap {
 					IOMMUFD_CMD_HWPT_GET_DIRTY_BITMAP)
 
 /**
+ * enum iommu_hwpt_invalidate_data_type - IOMMU HWPT Cache Invalidation
+ *                                        Data Type
+ * @IOMMU_HWPT_INVALIDATE_DATA_VTD_S1: Invalidation data for VTD_S1
+ */
+enum iommu_hwpt_invalidate_data_type {
+	IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
+};
+
+/**
  * enum iommu_hwpt_vtd_s1_invalidate_flags - Flags for Intel VT-d
  *                                           stage-1 cache invalidation
  * @IOMMU_VTD_INV_FLAGS_LEAF: The LEAF flag indicates whether only the
@@ -674,47 +636,46 @@ enum iommu_hwpt_vtd_s1_invalidate_flags {
 };
 
 /**
+ * enum iommu_hwpt_vtd_s1_invalidate_error - Result of invalidation
+ * @IOMMU_HWPT_INVALIDATE_VTD_S1_ICE: Invalidation Completion Error, details
+ *                                     refer to 11.4.7.1 Fault Status Register
+ *                                     of VT-d specification.
+ * @IOMMU_HWPT_INVALIDATE_VTD_S1_ITE: Invalidation Time-out Error, details
+ *                                     refer to 11.4.7.1 Fault Status Register
+ *                                     of VT-d specification.
+ */
+enum iommu_hwpt_vtd_s1_invalidate_error {
+	IOMMU_HWPT_INVALIDATE_VTD_S1_ICE = 1 << 0,
+	IOMMU_HWPT_INVALIDATE_VTD_S1_ITE = 1 << 1,
+};
+
+/**
  * struct iommu_hwpt_vtd_s1_invalidate - Intel VT-d cache invalidation
- *                                       (IOMMU_HWPT_DATA_VTD_S1)
+ *                                       (IOMMU_HWPT_INVALIDATE_DATA_VTD_S1)
  * @addr: The start address of the addresses to be invalidated. It needs
  *        to be 4KB aligned.
  * @npages: Number of contiguous 4K pages to be invalidated.
  * @flags: Combination of enum iommu_hwpt_vtd_s1_invalidate_flags
- * @__reserved: Must be 0
+ * @inv_error: One of enum iommu_hwpt_vtd_s1_invalidate_error
  *
  * The Intel VT-d specific invalidation data for user-managed stage-1 cache
  * invalidation in nested translation. Userspace uses this structure to
  * tell the impacted cache scope after modifying the stage-1 page table.
  *
  * Invalidating all the caches related to the page table by setting @addr
- * to be 0 and @npages to be __aligned_u64(-1). This includes the
- * corresponding device-TLB if ATS is enabled on the attached devices.
+ * to be 0 and @npages to be U64_MAX.
+ *
+ * @inv_error is meaningful only if the request is handled by kernel. This
+ * can be known by checking struct iommu_hwpt_invalidate::req_num output.
+ * @inv_error only covers the errors detected by hardware after submitting the
+ * invalidation. The software detected errors would go through the normal
+ * ioctl errno.
  */
 struct iommu_hwpt_vtd_s1_invalidate {
 	__aligned_u64 addr;
 	__aligned_u64 npages;
 	__u32 flags;
-	__u32 __reserved;
-};
-
-/**
- * struct iommu_hwpt_arm_smmuv3_invalidate - ARM SMMUv3 cahce invalidation
- *                                           (IOMMU_HWPT_DATA_ARM_SMMUV3)
- * @cmd: 128-bit cache invalidation command that runs in SMMU CMDQ.
- *       Must be little-endian.
- *
- * Supported command list:
- *     CMDQ_OP_TLBI_NSNH_ALL
- *     CMDQ_OP_TLBI_NH_VA
- *     CMDQ_OP_TLBI_NH_VAA
- *     CMDQ_OP_TLBI_NH_ALL
- *     CMDQ_OP_TLBI_NH_ASID
- *     CMDQ_OP_ATC_INV
- *     CMDQ_OP_CFGI_CD
- *     CMDQ_OP_CFGI_CD_ALL
- */
-struct iommu_hwpt_arm_smmuv3_invalidate {
-	__aligned_u64 cmd[2];
+	__u32 inv_error;
 };
 
 /**
@@ -725,21 +686,22 @@ struct iommu_hwpt_arm_smmuv3_invalidate {
  *             requests. The request entries in the array are of fixed width
  *             @req_len, and contain a user data structure for invalidation
  *             request specific to the given hardware page table.
- * @req_type: One of enum iommu_hwpt_data_type, defining the data type of all
- *            the entries in the invalidation request array. It should suit
- *            with the data_type passed per the allocation of the hwpt pointed
- *            by @hwpt_id.
+ * @req_type: One of enum iommu_hwpt_invalidate_data_type, defining the data
+ *            type of all the entries in the invalidation request array. It
+ *            should be a type supported by the hwpt pointed by @hwpt_id.
  * @req_len: Length (in bytes) of a request entry in the request array
  * @req_num: Input the number of cache invalidation requests in the array.
  *           Output the number of requests successfully handled by kernel.
- * @out_driver_error_code: Report a driver speicifc error code upon failure.
- *                         It's optional, driver has a choice to fill it or
- *                         not.
+ * @__reserved: Must be 0.
  *
  * Invalidate the iommu cache for user-managed page table. Modifications on a
  * user-managed page table should be followed by this operation to sync cache.
  * Each ioctl can support one or more cache invalidation requests in the array
  * that has a total size of @req_len * @req_num.
+ *
+ * An empty invalidation request array by setting @req_num==0 is allowed, and
+ * @req_len and @reqs_uptr would be ignored in this case. This can be used to
+ * check if the given @req_type is supported or not by kernel.
  */
 struct iommu_hwpt_invalidate {
 	__u32 size;
@@ -748,7 +710,7 @@ struct iommu_hwpt_invalidate {
 	__u32 req_type;
 	__u32 req_len;
 	__u32 req_num;
-	__u32 out_driver_error_code;
+	__u32 __reserved;
 };
 #define IOMMU_HWPT_INVALIDATE _IO(IOMMUFD_TYPE, IOMMUFD_CMD_HWPT_INVALIDATE)
 #endif

@@ -4136,10 +4136,32 @@ static void vtd_invalidate_piotlb(VTDPASIDAddressSpace *vtd_pasid_as,
     if (!vtd_idev || !vtd_idev->idev) {
         goto out;
     }
+
     if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
-                                         IOMMU_HWPT_DATA_VTD_S1, sizeof(*cache),
-                                         1, cache)) {
-        error_report("Cache flush failed");
+                                         IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
+                                         sizeof(*cache), 0, cache)) {
+        error_report("Cache flush type not supported, cache[0].inv_error: %u", cache[0].inv_error);
+        return;
+    }
+
+#if 0
+    cache[1].flags = 0xFFFFFFFF;
+    if (!iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
+                                          IOMMU_HWPT_INVALIDATE_DATA_VTD_S1+1,
+                                          sizeof(*cache), 1, cache)) {
+        return;
+    }
+
+    if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
+                                         IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
+                                         sizeof(*cache), 2, cache)) {
+        return;
+    }
+#endif
+    if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
+                                         IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
+                                         sizeof(*cache), 1, cache)) {
+        error_report("Cache flush failed %m,  cache[0].inv_error: %u",  cache[0].inv_error);
     }
 out:
     return;
@@ -4182,7 +4204,7 @@ static void vtd_piotlb_pasid_invalidate(IntelIOMMUState *s,
                                         uint16_t domain_id,
                                         uint32_t pasid)
 {
-    struct iommu_hwpt_vtd_s1_invalidate cache_info = { 0 };
+    struct iommu_hwpt_vtd_s1_invalidate cache_info[2] = { 0 };
     VTDPIOTLBInvInfo piotlb_info;
     VTDIOTLBPageInvInfo info;
     VTDAddressSpace *vtd_as;
@@ -4190,12 +4212,12 @@ static void vtd_piotlb_pasid_invalidate(IntelIOMMUState *s,
     VTDPASIDEntry pe;
     int ret;
 
-    cache_info.addr = 0;
-    cache_info.npages = (uint64_t)-1;
+    cache_info[0].addr = 0;
+    cache_info[0].npages = (uint64_t)-1;
 
     piotlb_info.domain_id = domain_id;
     piotlb_info.pasid = pasid;
-    piotlb_info.inv_data = &cache_info;
+    piotlb_info.inv_data = &cache_info[0];
 
     info.domain_id = domain_id;
     info.pasid = pasid;
@@ -4233,7 +4255,7 @@ static void vtd_piotlb_page_invalidate(IntelIOMMUState *s, uint16_t domain_id,
                                        uint32_t pasid, hwaddr addr, uint8_t am,
                                        bool ih)
 {
-    struct iommu_hwpt_vtd_s1_invalidate cache_info = { 0 };
+    struct iommu_hwpt_vtd_s1_invalidate cache_info[2] = { 0 };
     VTDPIOTLBInvInfo piotlb_info;
     VTDIOTLBPageInvInfo info;
     VTDAddressSpace *vtd_as;
@@ -4241,13 +4263,13 @@ static void vtd_piotlb_page_invalidate(IntelIOMMUState *s, uint16_t domain_id,
     hwaddr size = (1 << am) * VTD_PAGE_SIZE;
     int ret;
 
-    cache_info.addr = addr;
-    cache_info.npages = 1 << am;
-    cache_info.flags = ih ? IOMMU_VTD_INV_FLAGS_LEAF : 0;
+    cache_info[0].addr = addr;
+    cache_info[0].npages = 1 << am;
+    cache_info[0].flags = ih ? IOMMU_VTD_INV_FLAGS_LEAF : 0;
 
     piotlb_info.domain_id = domain_id;
     piotlb_info.pasid = pasid;
-    piotlb_info.inv_data = &cache_info;
+    piotlb_info.inv_data = &cache_info[0];
 
     info.is_piotlb = true;
     info.domain_id = domain_id;
