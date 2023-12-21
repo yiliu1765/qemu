@@ -4041,7 +4041,7 @@ static void vtd_replay_guest_pasid_bindings(IntelIOMMUState *s,
                                             VTDPASIDCacheInfo *pc_info)
 {
     VTDIOMMUFDDevice *vtd_idev;
-    int start = 0, end = 1; /* only rid2pasid is supported */
+    int start = 0, end = 1 << (VTD_GET_PSS(s->ecap) + 1);
     VTDPASIDCacheInfo walk_info;
 
     switch (pc_info->type) {
