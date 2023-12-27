@@ -626,17 +626,16 @@ enum iommu_hwpt_invalidate_data_type {
 /**
  * enum iommu_hwpt_vtd_s1_invalidate_flags - Flags for Intel VT-d
  *                                           stage-1 cache invalidation
- * @IOMMU_VTD_INV_FLAGS_LEAF: The LEAF flag indicates whether only the
- *                            leaf PTE caching needs to be invalidated
- *                            and other paging structure caches can be
- *                            preserved.
+ * @IOMMU_VTD_INV_FLAGS_LEAF: Indicates whether the invalidation applies
+ *                            to all-levels page structure cache or just
+ *                            the leaf PTE cache.
  */
 enum iommu_hwpt_vtd_s1_invalidate_flags {
 	IOMMU_VTD_INV_FLAGS_LEAF = 1 << 0,
 };
 
 /**
- * enum iommu_hwpt_vtd_s1_invalidate_error - Result of invalidation
+ * enum iommu_hwpt_vtd_s1_invalidate_error - Hardware error of invalidation
  * @IOMMU_HWPT_INVALIDATE_VTD_S1_ICE: Invalidation Completion Error, details
  *                                     refer to 11.4.7.1 Fault Status Register
  *                                     of VT-d specification.
@@ -652,11 +651,11 @@ enum iommu_hwpt_vtd_s1_invalidate_error {
 /**
  * struct iommu_hwpt_vtd_s1_invalidate - Intel VT-d cache invalidation
  *                                       (IOMMU_HWPT_INVALIDATE_DATA_VTD_S1)
- * @addr: The start address of the addresses to be invalidated. It needs
- *        to be 4KB aligned.
+ * @addr: The start address of the range to be invalidated. It needs to
+ *        be 4KB aligned.
  * @npages: Number of contiguous 4K pages to be invalidated.
  * @flags: Combination of enum iommu_hwpt_vtd_s1_invalidate_flags
- * @inv_error: One of enum iommu_hwpt_vtd_s1_invalidate_error
+ * @hw_error: One of enum iommu_hwpt_vtd_s1_invalidate_error
  *
  * The Intel VT-d specific invalidation data for user-managed stage-1 cache
  * invalidation in nested translation. Userspace uses this structure to
@@ -665,9 +664,11 @@ enum iommu_hwpt_vtd_s1_invalidate_error {
  * Invalidating all the caches related to the page table by setting @addr
  * to be 0 and @npages to be U64_MAX.
  *
- * @inv_error is meaningful only if the request is handled by kernel. This
- * can be known by checking struct iommu_hwpt_invalidate::req_num output.
- * @inv_error only covers the errors detected by hardware after submitting the
+ * The device TLB will be invalidated automatically if ATS is enabled.
+ *
+ * @hw_error is meaningful only if the request is handled by kernel. This
+ * can be known by checking struct iommu_hwpt_invalidate::entry_num output.
+ * @hw_error only covers the errors detected by hardware after submitting the
  * invalidation. The software detected errors would go through the normal
  * ioctl errno.
  */
@@ -675,41 +676,39 @@ struct iommu_hwpt_vtd_s1_invalidate {
 	__aligned_u64 addr;
 	__aligned_u64 npages;
 	__u32 flags;
-	__u32 inv_error;
+	__u32 hw_error;
 };
 
 /**
  * struct iommu_hwpt_invalidate - ioctl(IOMMU_HWPT_INVALIDATE)
  * @size: sizeof(struct iommu_hwpt_invalidate)
- * @hwpt_id: HWPT ID of a nested HWPT for cache invalidation
- * @reqs_uptr: User pointer to an array having @req_num of cache invalidation
- *             requests. The request entries in the array are of fixed width
- *             @req_len, and contain a user data structure for invalidation
- *             request specific to the given hardware page table.
- * @req_type: One of enum iommu_hwpt_invalidate_data_type, defining the data
- *            type of all the entries in the invalidation request array. It
- *            should be a type supported by the hwpt pointed by @hwpt_id.
- * @req_len: Length (in bytes) of a request entry in the request array
- * @req_num: Input the number of cache invalidation requests in the array.
- *           Output the number of requests successfully handled by kernel.
+ * @hwpt_id: ID of a nested HWPT for cache invalidation
+ * @data_uptr: User pointer to an array of driver-specific cache invalidation
+ *             data.
+ * @data_type: One of enum iommu_hwpt_invalidate_data_type, defining the data
+ *             type of all the entries in the invalidation request array. It
+ *             should be a type supported by the hwpt pointed by @hwpt_id.
+ * @entry_len: Length (in bytes) of a request entry in the request array
+ * @entry_num: Input the number of cache invalidation requests in the array.
+ *             Output the number of requests successfully handled by kernel.
  * @__reserved: Must be 0.
  *
  * Invalidate the iommu cache for user-managed page table. Modifications on a
  * user-managed page table should be followed by this operation to sync cache.
  * Each ioctl can support one or more cache invalidation requests in the array
- * that has a total size of @req_len * @req_num.
+ * that has a total size of @entry_len * @entry_num.
  *
- * An empty invalidation request array by setting @req_num==0 is allowed, and
- * @req_len and @reqs_uptr would be ignored in this case. This can be used to
- * check if the given @req_type is supported or not by kernel.
+ * An empty invalidation request array by setting @entry_num==0 is allowed, and
+ * @entry_len and @data_uptr would be ignored in this case. This can be used to
+ * check if the given @data_type is supported or not by kernel.
  */
 struct iommu_hwpt_invalidate {
 	__u32 size;
 	__u32 hwpt_id;
-	__aligned_u64 reqs_uptr;
-	__u32 req_type;
-	__u32 req_len;
-	__u32 req_num;
+	__aligned_u64 data_uptr;
+	__u32 data_type;
+	__u32 entry_len;
+	__u32 entry_num;
 	__u32 __reserved;
 };
 #define IOMMU_HWPT_INVALIDATE _IO(IOMMUFD_TYPE, IOMMUFD_CMD_HWPT_INVALIDATE)

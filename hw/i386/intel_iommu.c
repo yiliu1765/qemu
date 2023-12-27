@@ -4140,7 +4140,7 @@ static void vtd_invalidate_piotlb(VTDPASIDAddressSpace *vtd_pasid_as,
     if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
                                          IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
                                          sizeof(*cache), 0, cache)) {
-        error_report("Cache flush type not supported, cache[0].inv_error: %u", cache[0].inv_error);
+        error_report("Cache flush type not supported, cache[0].hw_error: %u", cache[0].hw_error);
         return;
     }
 
@@ -4161,8 +4161,9 @@ static void vtd_invalidate_piotlb(VTDPASIDAddressSpace *vtd_pasid_as,
     if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
                                          IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
                                          sizeof(*cache), 1, cache)) {
-        error_report("Cache flush failed %m,  cache[0].inv_error: %u",  cache[0].inv_error);
+        error_report("Cache flush failed %m,  cache[0].hw_error: %u",  cache[0].hw_error);
     }
+        info_report("Cache flushed, cache[0].hw_error: %u, uptr: %llx", cache[0].hw_error, (unsigned long long)cache);
 out:
     return;
 }

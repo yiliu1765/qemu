@@ -276,26 +276,26 @@ int iommufd_backend_alloc_hwpt(int iommufd, uint32_t dev_id,
 }
 
 int iommufd_backend_invalidate_cache(int iommufd, uint32_t hwpt_id,
-                                     uint32_t req_type,
-                                     uint32_t req_len, uint32_t req_num,
-                                     void *reqs_ptr)
+                                     uint32_t data_type,
+                                     uint32_t entry_len, uint32_t entry_num,
+                                     void *data_ptr)
 {
     int ret;
     struct iommu_hwpt_invalidate cache = {
         .size = sizeof(cache),
         .hwpt_id = hwpt_id,
-        .req_type = req_type,
-        .req_len = req_len,
-        .req_num = req_num,
-        .reqs_uptr = (uint64_t)reqs_ptr,
+        .data_type = data_type,
+        .entry_len = entry_len,
+        .entry_num = entry_num,
+        .data_uptr = (uint64_t)data_ptr,
     };
 
     ret = ioctl(iommufd, IOMMU_HWPT_INVALIDATE, &cache);
     if (ret) {
         error_report("IOMMU_HWPT_INVALIDATE failed: %s", strerror(errno));
     }
-    trace_iommufd_backend_invalidate_cache(iommufd, hwpt_id, req_len,
-                                           req_num, (uint64_t)reqs_ptr, ret);
+    trace_iommufd_backend_invalidate_cache(iommufd, hwpt_id, entry_len,
+                                           entry_num, (uint64_t)data_ptr, ret);
     return !ret ? 0 : -errno;
 }
 
