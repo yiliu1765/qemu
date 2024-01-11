@@ -619,6 +619,38 @@ out_single:
     return ret;
 }
 
+static int vfio_iommufd_device_attach_hwpt(IOMMUFDDevice *idev,
+                                           uint32_t hwpt_id)
+{
+    VFIODevice *vbasedev = idev->opaque;
+    Error *err = NULL;
+    int ret;
+
+    ret = iommufd_cdev_attach_ioas_hwpt(vbasedev, hwpt_id, &err);
+    if (err) {
+        error_report_err(err);
+    }
+    return ret;
+}
+
+static int vfio_iommufd_device_detach_hwpt(IOMMUFDDevice *idev)
+{
+    VFIODevice *vbasedev = idev->opaque;
+    Error *err = NULL;
+    int ret;
+
+    ret = iommufd_cdev_detach_ioas_hwpt(vbasedev, &err);
+    if (err) {
+        error_report_err(err);
+    }
+    return ret;
+}
+
+static IOMMUFDDeviceOps vfio_iommufd_device_ops = {
+    .attach_hwpt = vfio_iommufd_device_attach_hwpt,
+    .detach_hwpt = vfio_iommufd_device_detach_hwpt,
+};
+
 static void vfio_cdev_host_iommu_device_create(VFIODevice *vbasedev)
 {
     IOMMUFDDevice *idev = g_malloc0(sizeof(IOMMUFDDevice));
@@ -626,7 +658,7 @@ static void vfio_cdev_host_iommu_device_create(VFIODevice *vbasedev)
     vbasedev->base_hdev = &idev->base;
 
     iommufd_device_init(idev, vbasedev->iommufd, vbasedev->devid,
-                        vbasedev, NULL);
+                        vbasedev, &vfio_iommufd_device_ops);
 }
 
 static void vfio_iommu_iommufd_class_init(ObjectClass *klass, void *data)
