@@ -4137,33 +4137,49 @@ static void vtd_invalidate_piotlb(VTDPASIDAddressSpace *vtd_pasid_as,
         goto out;
     }
 
+# if 0
+    // check if the type is supported
     if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
                                          IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
                                          sizeof(*cache), 0, cache)) {
-        error_report("Cache flush type not supported, cache[0].hw_error: %u", cache[0].hw_error);
+        error_report("Cache flush type not supported");
         return;
     }
 
-#if 0
+    // negative: invalid flags
     cache[1].flags = 0xFFFFFFFF;
     if (!iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
                                           IOMMU_HWPT_INVALIDATE_DATA_VTD_S1+1,
                                           sizeof(*cache), 1, cache)) {
+        error_report("not expected");
         return;
     }
 
-    if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
+    // negative: invalid flags, fail the second request
+    if (!iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
                                          IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
                                          sizeof(*cache), 2, cache)) {
+        error_report("not expected");
+        return;
+    }
+
+    // negative: non-zero __reserved field
+    cache[1].flags = 0;
+    cache[1].__reserved = 0xffff;
+    if (!iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
+                                         IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
+                                         sizeof(*cache), 1, &cache[1])) {
+        error_report("not expected");
         return;
     }
 #endif
+
     if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
                                          IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
                                          sizeof(*cache), 1, cache)) {
-        error_report("Cache flush failed %m,  cache[0].hw_error: %u",  cache[0].hw_error);
+        error_report("Cache flush failed %m");
     }
-        info_report("Cache flushed, cache[0].hw_error: %u, uptr: %llx", cache[0].hw_error, (unsigned long long)cache);
+        info_report("Cache flushed, uptr: %llx, addr: %llx", (unsigned long long)cache, cache->addr);
 out:
     return;
 }

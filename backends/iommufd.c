@@ -212,7 +212,7 @@ int iommufd_backend_map_dma(IOMMUFDBackend *be, uint32_t ioas, hwaddr iova,
     trace_iommufd_backend_map_dma(be->fd, ioas, iova, size,
                                   vaddr, readonly, ret);
     if (ret) {
-        error_report("IOMMU_IOAS_MAP failed: %s", strerror(errno));
+        error_report("IOMMU_IOAS_MAP failed: %s, ioav: %llx", strerror(errno), (unsigned long long)iova);
     }
     return !ret ? 0 : -errno;
 }
