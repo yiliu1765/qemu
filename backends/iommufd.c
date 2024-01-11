@@ -291,13 +291,15 @@ static void register_types(void)
 
 type_init(register_types);
 
-void iommufd_device_init(IOMMUFDDevice *idev,
-                         IOMMUFDBackend *iommufd, int devid)
+void iommufd_device_init(IOMMUFDDevice *idev, IOMMUFDBackend *iommufd,
+                         int devid, void *opaque, IOMMUFDDeviceOps *ops)
 {
     host_iommu_base_device_init(&idev->base, HID_IOMMUFD,
                                 sizeof(IOMMUFDDevice));
     idev->iommufd = iommufd;
     idev->devid = devid;
+    idev->opaque = opaque;
+    idev->ops = ops;
 }
 
 int iommufd_device_get_info(IOMMUFDDevice *idev,
@@ -320,4 +322,16 @@ int iommufd_device_get_info(IOMMUFDDevice *idev,
     }
 
     return ret;
+}
+
+int iommufd_device_attach_hwpt(IOMMUFDDevice *idev, uint32_t hwpt_id)
+{
+    g_assert(idev->ops->attach_hwpt);
+    return idev->ops->attach_hwpt(idev, hwpt_id);
+}
+
+int iommufd_device_detach_hwpt(IOMMUFDDevice *idev)
+{
+    g_assert(idev->ops->detach_hwpt);
+    return idev->ops->detach_hwpt(idev);
 }

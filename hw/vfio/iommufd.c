@@ -625,7 +625,8 @@ static void vfio_cdev_host_iommu_device_create(VFIODevice *vbasedev)
 
     vbasedev->base_hdev = &idev->base;
 
-    iommufd_device_init(idev, vbasedev->iommufd, vbasedev->devid);
+    iommufd_device_init(idev, vbasedev->iommufd, vbasedev->devid,
+                        vbasedev, NULL);
 }
 
 static void vfio_iommu_iommufd_class_init(ObjectClass *klass, void *data)

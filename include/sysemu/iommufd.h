@@ -44,19 +44,30 @@ int iommufd_backend_invalidate_cache(IOMMUFDBackend *be, uint32_t hwpt_id,
                                      uint32_t *entry_num, void *data_ptr);
 
 
+typedef struct IOMMUFDDeviceOps IOMMUFDDeviceOps;
+
 /* Abstraction of host IOMMUFD device */
 typedef struct IOMMUFDDevice {
     /* private: */
     HostIOMMUDevice base;
+    void *opaque;
 
     /* public: */
     IOMMUFDBackend *iommufd;
     uint32_t devid;
+    IOMMUFDDeviceOps *ops;
 } IOMMUFDDevice;
 
-void iommufd_device_init(IOMMUFDDevice *idev,
-                         IOMMUFDBackend *iommufd, int devid);
+struct IOMMUFDDeviceOps {
+    int (*attach_hwpt)(IOMMUFDDevice *idev, uint32_t hwpt_id);
+    int (*detach_hwpt)(IOMMUFDDevice *idev);
+};
+
+void iommufd_device_init(IOMMUFDDevice *idev, IOMMUFDBackend *iommufd,
+                         int devid, void *opaque, IOMMUFDDeviceOps *ops);
 int iommufd_device_get_info(IOMMUFDDevice *idev,
                             enum iommu_hw_info_type *type,
                             uint32_t len, void *data, Error **errp);
+int iommufd_device_attach_hwpt(IOMMUFDDevice *idev, uint32_t hwpt_id);
+int iommufd_device_detach_hwpt(IOMMUFDDevice *idev);
 #endif
