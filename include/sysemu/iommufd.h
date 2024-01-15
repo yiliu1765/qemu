@@ -56,6 +56,7 @@ typedef struct IOMMUFDDevice {
     IOMMUFDBackend *iommufd;
     uint32_t devid;
     IOMMUFDDeviceOps *ops;
+    uint32_t ioas_id;
 } IOMMUFDDevice;
 
 struct IOMMUFDDeviceOps {
@@ -64,7 +65,8 @@ struct IOMMUFDDeviceOps {
 };
 
 void iommufd_device_init(IOMMUFDDevice *idev, IOMMUFDBackend *iommufd,
-                         int devid, void *opaque, IOMMUFDDeviceOps *ops);
+                         int devid, uint32_t ioas_id, void *opaque,
+                         IOMMUFDDeviceOps *ops);
 int iommufd_device_get_info(IOMMUFDDevice *idev,
                             enum iommu_hw_info_type *type,
                             uint32_t len, void *data, Error **errp);

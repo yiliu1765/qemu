@@ -292,12 +292,14 @@ static void register_types(void)
 type_init(register_types);
 
 void iommufd_device_init(IOMMUFDDevice *idev, IOMMUFDBackend *iommufd,
-                         int devid, void *opaque, IOMMUFDDeviceOps *ops)
+                         int devid, uint32_t ioas_id, void *opaque,
+                         IOMMUFDDeviceOps *ops)
 {
     host_iommu_base_device_init(&idev->base, HID_IOMMUFD,
                                 sizeof(IOMMUFDDevice));
     idev->iommufd = iommufd;
     idev->devid = devid;
+    idev->ioas_id = ioas_id;
     idev->opaque = opaque;
     idev->ops = ops;
 }

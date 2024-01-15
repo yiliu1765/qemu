@@ -654,11 +654,13 @@ static IOMMUFDDeviceOps vfio_iommufd_device_ops = {
 static void vfio_cdev_host_iommu_device_create(VFIODevice *vbasedev)
 {
     IOMMUFDDevice *idev = g_malloc0(sizeof(IOMMUFDDevice));
-
+    VFIOIOMMUFDContainer *container = container_of(vbasedev->bcontainer,
+                                                   VFIOIOMMUFDContainer,
+                                                   bcontainer);
     vbasedev->base_hdev = &idev->base;
 
     iommufd_device_init(idev, vbasedev->iommufd, vbasedev->devid,
-                        vbasedev, &vfio_iommufd_device_ops);
+                        container->ioas_id, vbasedev, &vfio_iommufd_device_ops);
 }
 
 static void vfio_iommu_iommufd_class_init(ObjectClass *klass, void *data)
