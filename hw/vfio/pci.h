@@ -139,6 +139,7 @@ struct VFIOPCIDevice {
     void *igd_opregion;
     PCIHostDeviceAddress host;
     QemuUUID vf_token;
+    char *vf_token_secret;
     EventNotifier err_notifier;
     EventNotifier req_notifier;
     int (*resetfn)(struct VFIOPCIDevice *);

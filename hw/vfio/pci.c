@@ -44,6 +44,7 @@
 #include "migration/blocker.h"
 #include "migration/qemu-file.h"
 #include "sysemu/iommufd.h"
+#include "crypto/secret_common.h"
 
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 
@@ -2992,6 +2993,23 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         goto error;
     }
 
+    if (vdev->vf_token_secret) {
+        g_autofree char *secret_uuid = NULL;
+
+        secret_uuid = qcrypto_secret_lookup_as_uuid(vdev->vf_token_secret,
+                                                    errp);
+        if (!secret_uuid) {
+            goto error;
+        }
+
+        if (!qemu_uuid_is_null(&vdev->vf_token)) {
+            qemu_uuid_unparse(&vdev->vf_token, uuid);
+            warn_report("Prefer secret vf_token %s, overwrite clear text %s",
+                        secret_uuid, uuid);
+        }
+        assert(!qemu_uuid_parse(secret_uuid, &vdev->vf_token));
+    }
+
     if (!qemu_uuid_is_null(&vdev->vf_token)) {
         qemu_uuid_unparse(&vdev->vf_token, uuid);
         name = g_strdup_printf("%s vf_token=%s", vbasedev->name, uuid);
@@ -3342,6 +3360,7 @@ static void vfio_instance_init(Object *obj)
 static Property vfio_pci_dev_properties[] = {
     DEFINE_PROP_PCI_HOST_DEVADDR("host", VFIOPCIDevice, host),
     DEFINE_PROP_UUID_NODEFAULT("vf-token", VFIOPCIDevice, vf_token),
+    DEFINE_PROP_STRING("vf-token-secret", VFIOPCIDevice, vf_token_secret),
     DEFINE_PROP_STRING("sysfsdev", VFIOPCIDevice, vbasedev.sysfsdev),
     DEFINE_PROP_ON_OFF_AUTO("x-pre-copy-dirty-page-tracking", VFIOPCIDevice,
                             vbasedev.pre_copy_dirty_page_tracking,
