@@ -54,5 +54,6 @@ int qcrypto_secret_lookup(const char *secretid,
                           Error **errp);
 char *qcrypto_secret_lookup_as_utf8(const char *secretid, Error **errp);
 char *qcrypto_secret_lookup_as_base64(const char *secretid, Error **errp);
+char *qcrypto_secret_lookup_as_uuid(const char *secretid, Error **errp);
 
 #endif /* QCRYPTO_SECRET_COMMON_H */

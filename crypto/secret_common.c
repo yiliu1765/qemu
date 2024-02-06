@@ -25,6 +25,7 @@
 #include "qom/object_interfaces.h"
 #include "qemu/base64.h"
 #include "qemu/module.h"
+#include "qemu/uuid.h"
 #include "trace.h"
 
 
@@ -376,6 +377,31 @@ char *qcrypto_secret_lookup_as_base64(const char *secretid,
     ret = g_base64_encode(data, datalen);
     g_free(data);
     return ret;
+}
+
+
+char *qcrypto_secret_lookup_as_uuid(const char *secretid,
+                                    Error **errp)
+{
+    uint8_t *data;
+    size_t datalen;
+
+    if (qcrypto_secret_lookup(secretid,
+                              &data,
+                              &datalen,
+                              errp) < 0) {
+        return NULL;
+    }
+
+    if (datalen != UUID_STR_LEN - 1 || !qemu_uuid_is_valid((char *)data)) {
+        error_setg(errp,
+                   "Data from secret %s is not valid uuid",
+                   secretid);
+        g_free(data);
+        return NULL;
+    }
+
+    return (char *)data;
 }
 
 
