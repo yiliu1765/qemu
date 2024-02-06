@@ -93,6 +93,8 @@ void qemu_uuid_unparse(const QemuUUID *uuid, char *out);
 
 char *qemu_uuid_unparse_strdup(const QemuUUID *uuid);
 
+bool qemu_uuid_is_valid(const char *str);
+
 int qemu_uuid_parse(const char *str, QemuUUID *uuid);
 
 QemuUUID qemu_uuid_bswap(QemuUUID uuid);

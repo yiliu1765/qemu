@@ -65,7 +65,7 @@ char *qemu_uuid_unparse_strdup(const QemuUUID *uuid)
                            uu[13], uu[14], uu[15]);
 }
 
-static bool qemu_uuid_is_valid(const char *str)
+bool qemu_uuid_is_valid(const char *str)
 {
     int i;
 
