@@ -41,6 +41,7 @@
 #include "trace.h"
 #include "qemu/jhash.h"
 #include "sysemu/iommufd.h"
+#include <sys/ioctl.h>
 
 /* context entry operations */
 #define VTD_CE_GET_RID2PASID(ce) \
@@ -2722,7 +2723,9 @@ static int vtd_get_s2_hwpt(IntelIOMMUState *s, IOMMUFDDevice *idev,
     iommufd->listener = iommufd_s2domain_memory_listener;
 
     ret = iommufd_backend_alloc_hwpt(iommufd->fd, idev->dev_id,
-                                     ioas_id, IOMMU_HWPT_ALLOC_NEST_PARENT,
+                                     ioas_id,
+                                     IOMMU_HWPT_ALLOC_NEST_PARENT |
+                                     IOMMU_HWPT_ALLOC_DIRTY_TRACKING,
 				     IOMMU_HWPT_DATA_NONE,
                                      0, NULL, s2_hwptid);
     if (!ret) {
@@ -4126,7 +4129,14 @@ static void vtd_invalidate_piotlb(VTDPASIDAddressSpace *vtd_pasid_as,
         .bus = vtd_pasid_as->bus,
         .devfn = devfn,
     };
+    struct iommu_hwpt_set_dirty_tracking dirty = {
+	    .size = sizeof(struct iommu_hwpt_set_dirty_tracking),
+	    .flags = IOMMU_HWPT_DIRTY_TRACKING_ENABLE,
+	    .hwpt_id = hwpt->hwpt_id,
+	    .__reserved = 0,
+    };
     IntelIOMMUState *s = vtd_pasid_as->iommu_state;
+    VTDHwpt *s2_hwpt;
 
     if (!hwpt) {
         goto out;
@@ -4173,6 +4183,22 @@ static void vtd_invalidate_piotlb(VTDPASIDAddressSpace *vtd_pasid_as,
         return;
     }
 #endif
+
+    /*
+     * This is for testing unmap on s2 hwpt. MemoryListener unregister and
+     * register would loop all the region_add/del callabck, hence it can
+     * trriger unmap on s2 hwpt.
+     */
+    memory_listener_unregister(&vtd_idev->idev->iommufd->listener);
+    memory_listener_register(&vtd_idev->idev->iommufd->listener, &address_space_memory);
+
+    /* Trigger dirty tracking set to test if it takes effect on s2 hwpt */
+    s2_hwpt = (VTDHwpt *)vtd_idev->idev->iommufd->s2_hwpt;
+    dirty.hwpt_id = s2_hwpt->hwpt_id;
+    printf("%s hwpt_id: %u\n", __func__, dirty.hwpt_id);
+    if (ioctl(hwpt->iommufd, IOMMU_HWPT_SET_DIRTY_TRACKING, &dirty)) {
+	    error_report("Dirty tracking set failed %m");
+    }
 
     if (iommufd_backend_invalidate_cache(hwpt->iommufd, hwpt->hwpt_id,
                                          IOMMU_HWPT_INVALIDATE_DATA_VTD_S1,
