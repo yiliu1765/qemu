@@ -5578,12 +5578,6 @@ static int vtd_check_hdev(IntelIOMMUState *s, VTDHostIOMMUDevice *vtd_hdev,
     HostIOMMUDevice *base_dev = vtd_hdev->dev;
     IOMMUFDDevice *idev;
 
-    if (s->scalable_modern) {
-        error_setg(errp,
-                   "host device is unsupported in scalable modern mode yet");
-        return -EINVAL;
-    }
-
     if (base_dev->type == HID_LEGACY) {
         IOMMULegacyDevice *ldev = container_of(base_dev,
                                                IOMMULegacyDevice, base);
