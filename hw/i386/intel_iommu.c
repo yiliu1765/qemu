@@ -5609,8 +5609,7 @@ static bool vtd_check_hiod(IntelIOMMUState *s, VTDHostIOMMUDevice *vtd_hiod,
     }
     vtd_hiod->errata = ret;
 
-    error_setg(errp, "host device is unsupported in scalable modern mode yet");
-    return false;
+    return true;
 }
 
 static bool vtd_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
