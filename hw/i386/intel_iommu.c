@@ -2597,6 +2597,8 @@ static void vtd_ioas_container_destroy(VTDIOASContainer *container)
     g_free(container);
 }
 
+static int pasid_300_attached = 0;
+
 static int vtd_device_attach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
                                   uint32_t rid_pasid, VTDPASIDEntry *pe,
                                   VTDS2Hwpt *s2_hwpt, VTDHwpt *hwpt,
@@ -2604,6 +2606,7 @@ static int vtd_device_attach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
 {
     HostIOMMUDeviceIOMMUFD *idev = HOST_IOMMU_DEVICE_IOMMUFD(vtd_hiod->hiod);
     int ret;
+    Error *err;
 
     if (vtd_pe_pgtt_is_flt(pe)) {
         ret = vtd_create_s1_hwpt(idev, s2_hwpt, hwpt, pe, errp);
@@ -2629,6 +2632,64 @@ static int vtd_device_attach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
     s2_hwpt->users++;
     hwpt->s2_hwpt = s2_hwpt;
 
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 60, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 60);
+    } else {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 60, s2_hwpt->hwpt_id, &err)) {
+            printf("%s, try to attach PASID %u s2 hwpt_id failed\n", __func__, 60);
+        } else {
+            printf("%s, try to attach PASID %u hwpt succ\n", __func__, 60);
+        }
+    }
+
+    /* FIXME: for testing, attach the hwpt to pasid #300 as well */
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 300, s2_hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u to parent_id failed\n", __func__, 300);
+    } else {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 300, hwpt->hwpt_id, &err)) {
+            printf("%s, try to attach PASID %u hwpt_id failed\n", __func__, 300);
+        } else {
+            printf("%s, try to attach PASID %u hwpt succ\n", __func__, 300);
+        }
+        pasid_300_attached = 1;
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1022, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1022);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1025, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1025);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 63, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 63);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 64, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 64);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1325, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1325);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1086, s2_hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1086);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1094, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1094);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, INT_MAX, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %x hwpt_id failed %m\n", __func__, INT_MAX);
+    }
+
+    if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, (1 << 20) - 1, hwpt->hwpt_id, &err)) {
+        printf("%s, try to attach PASID %x hwpt_id failed %m\n", __func__, (1 << 20) - 1);
+    }
+
     return 0;
 }
 
@@ -2651,6 +2712,23 @@ static void vtd_device_detach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
     if (ret) {
         error_report("devid %d pasid %d failed to attach hwpt %d",
                      idev->devid, rid_pasid, hwpt->hwpt_id);
+    }
+
+    if (pasid_300_attached) {
+        Error *err;
+
+        if (!host_iommu_device_iommufd_pasid_detach_hwpt(idev, 300, &err)) {
+            printf("%s, detach PASID 300 failed %m\n", __func__);
+        }
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 60, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 63, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 64, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 1022, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 1025, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 1086, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 1094, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 1325, &err);
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, (1 << 20) - 1, &err);
     }
 
     if (vtd_pe_pgtt_is_flt(pe)) {
