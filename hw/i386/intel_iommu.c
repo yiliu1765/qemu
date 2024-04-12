@@ -5841,7 +5841,7 @@ static void vtd_cap_init(IntelIOMMUState *s)
 
     /* TODO: read cap/ecap from host to decide which cap to be exposed. */
     if (s->scalable_modern) {
-        s->ecap |= VTD_ECAP_SMTS | VTD_ECAP_FLTS;
+        s->ecap |= VTD_ECAP_SMTS | VTD_ECAP_SRS | VTD_ECAP_FLTS;
         if (s->fs1gp) {
             s->cap |= VTD_CAP_FS1GP;
         }
