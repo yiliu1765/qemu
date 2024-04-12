@@ -111,10 +111,22 @@ struct HostIOMMUDeviceIOMMUFDClass {
      * Returns: true on success, false on failure.
      */
     bool (*detach_hwpt)(HostIOMMUDeviceIOMMUFD *idev, Error **errp);
+    bool (*pasid_attach_hwpt)(HostIOMMUDeviceIOMMUFD *idev,
+                              uint32_t pasid,
+                              uint32_t hwpt_id, Error **errp);
+    bool (*pasid_detach_hwpt)(HostIOMMUDeviceIOMMUFD *idev,
+                              uint32_t pasid, Error **errp);
 };
 
 bool host_iommu_device_iommufd_attach_hwpt(HostIOMMUDeviceIOMMUFD *idev,
                                            uint32_t hwpt_id, Error **errp);
 bool host_iommu_device_iommufd_detach_hwpt(HostIOMMUDeviceIOMMUFD *idev,
                                            Error **errp);
+bool
+host_iommu_device_iommufd_pasid_attach_hwpt(HostIOMMUDeviceIOMMUFD *idev,
+                                            uint32_t pasid,
+                                            uint32_t hwpt_id, Error **errp);
+bool
+host_iommu_device_iommufd_pasid_detach_hwpt(HostIOMMUDeviceIOMMUFD *idev,
+                                            uint32_t pasid, Error **errp);
 #endif
