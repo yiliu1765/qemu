@@ -32,6 +32,7 @@ typedef struct HostIOMMUDeviceCaps {
     uint64_t hw_caps;
     bool nesting;
     bool fs1gp;
+    uint32_t errata;
 } HostIOMMUDeviceCaps;
 
 #define TYPE_HOST_IOMMU_DEVICE "host-iommu-device"
@@ -130,6 +131,7 @@ struct HostIOMMUDeviceClass {
 #define HOST_IOMMU_DEVICE_CAP_AW_BITS           1
 #define HOST_IOMMU_DEVICE_CAP_NESTING           2
 #define HOST_IOMMU_DEVICE_CAP_FS1GP             3
+#define HOST_IOMMU_DEVICE_CAP_ERRATA            4
 
 /**
  * enum host_iommu_device_iommu_hw_info_type - IOMMU Hardware Info Types
