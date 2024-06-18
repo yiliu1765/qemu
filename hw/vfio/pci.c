@@ -3500,6 +3500,7 @@ static const Property vfio_pci_dev_properties[] = {
                      TYPE_IOMMUFD_BACKEND, IOMMUFDBackend *),
 #endif
     DEFINE_PROP_BOOL("skip-vsc-check", VFIOPCIDevice, skip_vsc_check, true),
+    DEFINE_PROP_BOOL("x-dmabuf", VFIOPCIDevice, vbasedev.use_dmabuf, false),
 };
 
 #ifdef CONFIG_IOMMUFD
