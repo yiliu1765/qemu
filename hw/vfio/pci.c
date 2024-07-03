@@ -3217,6 +3217,10 @@ static void vfio_pci_realize(PCIDevice *pdev, Error **errp)
         goto error;
     }
 
+    if (vdev->secure) {
+        vbasedev->use_dmabuf = true;
+    }
+
     if (!vfio_populate_device(vdev, errp)) {
         goto error;
     }
@@ -3644,6 +3648,7 @@ static const Property vfio_pci_dev_properties[] = {
 #endif
     DEFINE_PROP_BOOL("skip-vsc-check", VFIOPCIDevice, skip_vsc_check, true),
     DEFINE_PROP_BOOL("x-dmabuf", VFIOPCIDevice, vbasedev.use_dmabuf, false),
+    DEFINE_PROP_BOOL("x-secure-mode", VFIOPCIDevice, secure, false),
 };
 
 #ifdef CONFIG_IOMMUFD
