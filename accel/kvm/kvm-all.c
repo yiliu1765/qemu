@@ -626,6 +626,9 @@ static int kvm_mem_flags(MemoryRegion *mr)
         assert(kvm_guest_memfd_supported);
         flags |= KVM_MEM_GUEST_MEMFD;
     }
+    if (memory_region_is_dmabuf(mr)) {
+        flags |= KVM_MEM_VFIO_DMABUF;
+    }
     return flags;
 }
 
@@ -3057,7 +3060,8 @@ int kvm_convert_memory(hwaddr start, hwaddr size, bool to_private)
         return ret;
     }
 
-    if (!memory_region_has_guest_memfd(mr)) {
+    if (!(memory_region_has_guest_memfd(mr) ||
+          memory_region_is_dmabuf(mr))) {
         /*
          * Because vMMIO region must be shared, guest TD may convert vMMIO
          * region to shared explicitly.  Don't complain such case.  See
@@ -3082,7 +3086,9 @@ int kvm_convert_memory(hwaddr start, hwaddr size, bool to_private)
     } else {
         ret = kvm_set_memory_attributes_shared(start, size);
     }
-    if (ret) {
+
+    /* No ram_block discard for private mmio */
+    if (ret || memory_region_is_dmabuf(mr)) {
         goto out_unref;
     }
 
