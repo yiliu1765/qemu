@@ -82,7 +82,8 @@ static inline bool clear_bmap_test_and_clear(RAMBlock *rb, uint64_t page)
 
 static inline bool offset_in_ramblock(RAMBlock *b, ram_addr_t offset)
 {
-    return (b && b->host && offset < b->used_length) ? true : false;
+    return (b && (b->host || b->flags & RAM_DMABUF) &&
+            offset < b->used_length) ? true : false;
 }
 
 static inline void *ramblock_ptr(RAMBlock *block, ram_addr_t offset)
@@ -136,6 +137,8 @@ RAMBlock *qemu_ram_alloc_from_fd(ram_addr_t size, ram_addr_t max_size,
 
 RAMBlock *qemu_ram_alloc_from_ptr(ram_addr_t size, void *host,
                                   MemoryRegion *mr, Error **errp);
+RAMBlock *qemu_mmio_alloc_from_dmabuf(ram_addr_t size, int dmabuf_fd,
+                                      MemoryRegion *mr, Error **errp);
 RAMBlock *qemu_ram_alloc(ram_addr_t size, uint32_t ram_flags, MemoryRegion *mr,
                          Error **errp);
 RAMBlock *qemu_ram_alloc_resizeable(ram_addr_t size, ram_addr_t max_size,
