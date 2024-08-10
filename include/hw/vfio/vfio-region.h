@@ -16,6 +16,7 @@ typedef struct VFIOMmap {
     void *mmap;
     off_t offset;
     size_t size;
+    int dmabuf_fd;
 } VFIOMmap;
 
 typedef struct VFIODevice VFIODevice;

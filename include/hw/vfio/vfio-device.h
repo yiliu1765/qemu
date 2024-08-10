@@ -84,6 +84,7 @@ typedef struct VFIODevice {
     VFIOIOASHwpt *hwpt;
     QLIST_ENTRY(VFIODevice) hwpt_next;
     struct vfio_region_info **reginfo;
+    bool use_dmabuf;
 } VFIODevice;
 
 struct VFIODeviceOps {
