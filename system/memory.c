@@ -1718,6 +1718,19 @@ void memory_region_init_ram_device_ptr(MemoryRegion *mr,
     mr->ram_block = qemu_ram_alloc_from_ptr(size, ptr, mr, &error_abort);
 }
 
+void memory_region_init_dmabuf(MemoryRegion *mr, Object *owner,
+                               const char *name, uint64_t size,
+                               int dmabuf_fd)
+{
+    memory_region_init(mr, owner, name, size);
+    mr->ram = true;
+    mr->terminates = true;
+    mr->ram_device = true;
+    mr->opaque = mr;
+    mr->destructor = memory_region_destructor_ram;
+    mr->ram_block = qemu_mmio_alloc_from_dmabuf(size, dmabuf_fd, mr, &error_abort);
+}
+
 void memory_region_init_alias(MemoryRegion *mr,
                               Object *owner,
                               const char *name,
@@ -1868,6 +1881,11 @@ bool memory_region_is_ram_device(MemoryRegion *mr)
     return mr->ram_device;
 }
 
+bool memory_region_is_dmabuf(MemoryRegion *mr)
+{
+    return mr->ram && (mr->ram_block->flags & RAM_DMABUF);
+}
+
 bool memory_region_is_protected(MemoryRegion *mr)
 {
     return mr->ram && (mr->ram_block->flags & RAM_PROTECTED);
@@ -1875,7 +1893,7 @@ bool memory_region_is_protected(MemoryRegion *mr)
 
 bool memory_region_has_guest_memfd(MemoryRegion *mr)
 {
-    return mr->ram_block && mr->ram_block->guest_memfd >= 0;
+    return mr->ram_block && (mr->ram_block->flags & RAM_GUEST_MEMFD);
 }
 
 uint8_t memory_region_get_dirty_log_mask(MemoryRegion *mr)

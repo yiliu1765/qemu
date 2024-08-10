@@ -1536,6 +1536,15 @@ void memory_region_init_ram_device_ptr(MemoryRegion *mr,
                                        void *ptr);
 
 /**
+ * memory_region_init_dmabuf:  Initialize MMIO device memory region from
+ *                             a DMABUF fd (filled in guest_memfd).
+ *
+ * TODO.
+ */
+void memory_region_init_dmabuf(MemoryRegion *mr, Object *owner,
+                               const char *name, uint64_t size,
+                               int dmabuf_fd);
+/**
  * memory_region_init_alias: Initialize a memory region that aliases all or a
  *                           part of another memory region.
  *
@@ -1771,6 +1780,17 @@ static inline bool memory_region_is_ram(MemoryRegion *mr)
  * @mr: the memory region being queried
  */
 bool memory_region_is_ram_device(MemoryRegion *mr);
+
+
+/**
+ * memory_region_is_dmabuf: check whether a memory region is backed by dmabuf
+ * of a physical device, i.e. MMIO BAR of an vfio-pci assigned private device.
+ *
+ * Returns %true if a ram region is backed by dmabuf of a device.
+ *
+ * @mr: the memory region being queried
+ */
+bool memory_region_is_dmabuf(MemoryRegion *mr);
 
 /**
  * memory_region_is_romd: check whether a memory region is in ROMD mode
