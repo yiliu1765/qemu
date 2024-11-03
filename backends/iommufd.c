@@ -217,7 +217,7 @@ bool iommufd_backend_alloc_hwpt(IOMMUFDBackend *be, uint32_t dev_id,
     int ret, fd = be->fd;
     struct iommu_hwpt_alloc alloc_hwpt = {
         .size = sizeof(struct iommu_hwpt_alloc),
-        .flags = flags,
+        .flags = flags | IOMMU_HWPT_ALLOC_PASID,
         .dev_id = dev_id,
         .pt_id = pt_id,
         .data_type = data_type,
