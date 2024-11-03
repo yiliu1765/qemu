@@ -6085,6 +6085,8 @@ static bool vtd_pci_device_get_pasid_cap(PCIBus *bus,
 
     assert(0 <= devfn && devfn < PCI_DEVFN_MAX);
 
+    return 1;
+
     return (s->ecap & VTD_ECAP_PASID);
 }
 
