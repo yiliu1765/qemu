@@ -3480,6 +3480,9 @@ static void vfio_exitfn(PCIDevice *pdev)
     }
     vfio_teardown_msi(vdev);
     vfio_pci_disable_rp_atomics(vdev);
+#ifdef CONFIG_IOMMUFD
+    vfio_pci_tsm_unbind(vdev);
+#endif
     vfio_bars_exit(vdev);
     vfio_migration_exit(vbasedev);
     if (!vbasedev->mdev) {
