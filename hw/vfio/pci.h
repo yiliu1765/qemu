@@ -255,5 +255,10 @@ extern const VMStateDescription vfio_display_vmstate;
 int vfio_pci_tsm_bind(VFIOPCIDevice *vdev);
 int vfio_pci_tsm_unbind(VFIOPCIDevice *vdev);
 VFIOPCIDevice *find_vfio_by_devid(uint32_t devid);
+int vfio_pci_tsm_guest_request(VFIOPCIDevice *vdev,  uint32_t type,
+                               void *type_info, uint32_t type_info_len,
+                               void *req, uint32_t req_len,
+                               void *resp, uint32_t resp_len,
+                               uint32_t *actual_resp_len);
 
 #endif /* HW_VFIO_VFIO_PCI_H */

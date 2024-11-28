@@ -3436,6 +3436,31 @@ VFIOPCIDevice *find_vfio_by_devid(uint32_t devid)
 
     return (VFIOPCIDevice *)object_dynamic_cast(OBJECT(pdev), TYPE_VFIO_PCI);
 }
+
+int vfio_pci_tsm_guest_request(VFIOPCIDevice *vdev,  uint32_t type,
+                               void *type_info, uint32_t type_info_len,
+                               void *req, uint32_t req_len,
+                               void *resp, uint32_t resp_len,
+                               uint32_t *actual_resp_len)
+{
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    IOMMUFDBackend *iommufd = vbasedev->iommufd;
+    struct IOMMUFDVdevice *vdevice = vdev->vdevice;
+
+    if (!vdev->secure || !vdev->intf_id || !vbasedev->iommufd) {
+        return -1;
+    }
+
+    if (iommufd_backend_tsm_guest_request(iommufd, vdevice->vdevice_id,
+                                          type, type_info, type_info_len,
+                                          req, req_len, resp, resp_len,
+                                          actual_resp_len)) {
+        error_report("iommufd_backend_tsm_guest_request failed");
+        return -1;
+    }
+
+    return 0;
+}
 #endif
 
 static void vfio_exitfn(PCIDevice *pdev)
