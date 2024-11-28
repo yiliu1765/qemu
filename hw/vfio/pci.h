@@ -194,6 +194,9 @@ struct VFIOPCIDevice {
     VFIODisplay *dpy;
     Notifier irqchip_change_notifier;
     bool secure;
+    uint64_t intf_id;
+    struct IOMMUFDViommu *viommu;
+    struct IOMMUFDVdevice *vdevice;
 };
 
 /* Use uin32_t for vendor & device so PCI_ANY_ID expands and cannot match hw */
@@ -248,5 +251,9 @@ bool vfio_display_probe(VFIOPCIDevice *vdev, Error **errp);
 void vfio_display_finalize(VFIOPCIDevice *vdev);
 
 extern const VMStateDescription vfio_display_vmstate;
+
+int vfio_pci_tsm_bind(VFIOPCIDevice *vdev);
+int vfio_pci_tsm_unbind(VFIOPCIDevice *vdev);
+VFIOPCIDevice *find_vfio_by_devid(uint32_t devid);
 
 #endif /* HW_VFIO_VFIO_PCI_H */

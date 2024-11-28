@@ -21,6 +21,7 @@
 #include "qemu/osdep.h"
 #include CONFIG_DEVICES /* CONFIG_IOMMUFD */
 #include <linux/vfio.h>
+#include <linux/iommufd.h>
 #include <sys/ioctl.h>
 
 #include "hw/hw.h"
@@ -46,6 +47,8 @@
 #include "system/iommufd.h"
 #include "vfio-migration-internal.h"
 #include "vfio-helpers.h"
+#include "vfio-iommufd.h"
+#include "hw/i386/pc.h"
 
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 
@@ -3322,6 +3325,118 @@ static void vfio_instance_finalize(Object *obj)
 
     vfio_pci_put_device(vdev);
 }
+
+#ifdef CONFIG_IOMMUFD
+static uint32_t vdev_to_func_id(struct VFIOPCIDevice *vdev)
+{
+    uint32_t func_id;
+
+    func_id = vdev->host.bus << 8 | vdev->host.slot << 3 | vdev->host.function;
+    if (vdev->host.domain)
+        func_id |= ((vdev->host.domain << 16) | (1 << 24));
+
+    return func_id;
+}
+
+int vfio_pci_tsm_bind(VFIOPCIDevice *vdev)
+{
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    IOMMUFDBackend *iommufd = vbasedev->iommufd;
+    struct IOMMUFDViommu *viommu;
+    struct IOMMUFDVdevice *vdevice;
+    struct vfio_pci_tsm_bind bind = { 0 };
+    int ret;
+
+    if (!vdev->secure || vdev->intf_id || !vbasedev->iommufd) {
+        return -1;
+    }
+
+    viommu = iommufd_backend_alloc_viommu(iommufd, vbasedev->devid,
+                                          0, /* TODO: IOMMU_VIOMMU_TYPE_KVM_VALID */
+                                          IOMMU_VIOMMU_TYPE_INTEL_TDXC,
+                                          vbasedev->hwpt->hwpt_id);
+    if (!viommu) {
+        error_report("iommufd_backend_alloc_viommu failed");
+        return -1;
+    }
+
+    vdevice = iommufd_backend_alloc_vdevice(iommufd, viommu->viommu_id,
+                                            vbasedev->devid,
+                                            pci_get_bdf(&vdev->pdev));
+    if (!vdevice) {
+        error_report("iommufd_backend_alloc_vdevice failed");
+        goto err_free_viommu;
+    }
+
+    bind.argsz = sizeof(bind);
+    bind.vdevice_id = vdevice->vdevice_id;
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_TSM_BIND, &bind);
+    if (ret) {
+         error_report("VFIO_DEVICE_TSM_BIND failed");
+         goto err_free_vdevice;
+    }
+
+    vdev->viommu = viommu;
+    vdev->vdevice = vdevice;
+    vdev->intf_id = vdev_to_func_id(vdev);
+
+    return 0;
+
+err_free_vdevice:
+    iommufd_backend_free_id(iommufd, vdevice->vdevice_id);
+    g_free(vdevice);
+err_free_viommu:
+    iommufd_backend_free_id(iommufd, viommu->viommu_id);
+    g_free(viommu);
+    return -1;
+}
+
+int vfio_pci_tsm_unbind(VFIOPCIDevice *vdev)
+{
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    IOMMUFDBackend *iommufd = vbasedev->iommufd;
+    struct IOMMUFDViommu *viommu = vdev->viommu;
+    struct IOMMUFDVdevice *vdevice = vdev->vdevice;
+    struct vfio_pci_tsm_unbind unbind = { 0 };
+    int ret;
+
+    if (!vdev->secure || !vdev->intf_id || !vbasedev->iommufd) {
+        return -1;
+    }
+
+    unbind.argsz = sizeof(unbind);
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_TSM_UNBIND, &unbind);
+    if (ret) {
+        warn_report("VFIO_DEVICE_TSM_UNBIND failed, ret %d", ret);
+        return ret;
+    }
+
+    iommufd_backend_free_id(iommufd, vdevice->vdevice_id);
+    vdev->vdevice = NULL;
+    g_free(vdevice);
+    iommufd_backend_free_id(iommufd, viommu->viommu_id);
+    vdev->viommu = NULL;
+    g_free(viommu);
+    vdev->intf_id = 0;
+    return 0;
+}
+
+VFIOPCIDevice *find_vfio_by_devid(uint32_t devid)
+{
+    MachineState *ms = MACHINE(qdev_get_machine());
+    PCMachineState *pcms = PC_MACHINE(ms);
+    PCIBus *bus = pcms->pcibus;
+    PCIDevice *pdev;
+
+    pdev = pci_find_device(bus, (devid >> 8) & 0xff,
+                           (devid) & 0xff);
+    if (!pdev) {
+        return NULL;
+    }
+
+    return (VFIOPCIDevice *)object_dynamic_cast(OBJECT(pdev), TYPE_VFIO_PCI);
+}
+#endif
 
 static void vfio_exitfn(PCIDevice *pdev)
 {
