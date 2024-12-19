@@ -34,6 +34,7 @@ static int iommufd_cdev_map(const VFIOContainerBase *bcontainer, hwaddr iova,
     const VFIOIOMMUFDContainer *container =
         container_of(bcontainer, VFIOIOMMUFDContainer, bcontainer);
 
+printf("%s iova: %llx\n", __func__, (unsigned long long)iova);
     return iommufd_backend_map_dma(container->be,
                                    container->ioas_id,
                                    iova, size, vaddr, readonly);
@@ -323,6 +324,7 @@ static bool iommufd_cdev_autodomains_get(VFIODevice *vbasedev,
         flags = IOMMU_HWPT_ALLOC_DIRTY_TRACKING;
     }
 
+    flags |= IOMMU_HWPT_ALLOC_PASID;
     if (!iommufd_backend_alloc_hwpt(iommufd, vbasedev->devid,
                                     container->ioas_id, flags,
                                     IOMMU_HWPT_DATA_NONE, 0, NULL,
@@ -833,7 +835,16 @@ host_iommu_device_iommufd_vfio_pasid_attach_hwpt(HostIOMMUDeviceIOMMUFD *idev,
         .pasid = pasid,
         .pt_id = hwpt_id,
     };
+#if 0
+    attach.flags = 1 | 2 | 4;
+    ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOMMUFD_PT, &attach);
 
+    attach.flags = 2 | 4;
+    ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOMMUFD_PT, &attach);
+
+    attach.flags =  4;
+    ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOMMUFD_PT, &attach);
+#endif
     return !ioctl(vbasedev->fd, VFIO_DEVICE_ATTACH_IOMMUFD_PT, &attach);
 }
 
@@ -883,6 +894,7 @@ static bool hiod_iommufd_vfio_realize(HostIOMMUDevice *hiod, void *opaque,
         caps->errata = data.vtd.flags & IOMMU_HW_INFO_VTD_ERRATA_772415_SPR17;
         break;
     case IOMMU_HW_INFO_TYPE_NONE:
+    case IOMMU_HW_INFO_TYPE_ARM_SMMUV3:
         break;
     }
 
