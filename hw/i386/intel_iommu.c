@@ -2719,20 +2719,6 @@ static void vtd_device_detach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
     HostIOMMUDeviceIOMMUFD *idev = HOST_IOMMU_DEVICE_IOMMUFD(vtd_hiod->hiod);
     int ret;
 
-    if (vtd_hiod->iommu_state->dmar_enabled) {
-        ret = !host_iommu_device_iommufd_detach_hwpt(idev, errp);
-        trace_vtd_device_detach_hwpt(idev->devid, rid_pasid, ret);
-    } else {
-        ret = !host_iommu_device_iommufd_attach_hwpt(idev, idev->ioas_id, errp);
-        trace_vtd_device_reattach_def_ioas(idev->devid, rid_pasid,
-                                           idev->ioas_id, ret);
-    }
-
-    if (ret) {
-        error_report("devid %d pasid %d failed to attach hwpt %d",
-                     idev->devid, rid_pasid, hwpt->hwpt_id);
-    }
-
     if (pasid_300_attached) {
         Error *err;
 
@@ -2748,6 +2734,21 @@ static void vtd_device_detach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
         host_iommu_device_iommufd_pasid_detach_hwpt(idev, 1094, &err);
         host_iommu_device_iommufd_pasid_detach_hwpt(idev, 1325, &err);
         host_iommu_device_iommufd_pasid_detach_hwpt(idev, (1 << 20) - 1, &err);
+        printf("%s, detach PASIDs\n", __func__);
+    }
+
+    if (vtd_hiod->iommu_state->dmar_enabled) {
+        ret = !host_iommu_device_iommufd_detach_hwpt(idev, errp);
+        trace_vtd_device_detach_hwpt(idev->devid, rid_pasid, ret);
+    } else {
+        ret = !host_iommu_device_iommufd_attach_hwpt(idev, idev->ioas_id, errp);
+        trace_vtd_device_reattach_def_ioas(idev->devid, rid_pasid,
+                                           idev->ioas_id, ret);
+    }
+
+    if (ret) {
+        error_report("devid %d pasid %d failed to attach hwpt %d",
+                     idev->devid, rid_pasid, hwpt->hwpt_id);
     }
 
     if (vtd_pe_pgtt_is_flt(pe)) {
