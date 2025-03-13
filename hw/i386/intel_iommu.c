@@ -2530,7 +2530,7 @@ static void vtd_init_s1_hwpt_data(struct iommu_hwpt_vtd_s1 *vtd,
 
 static int vtd_create_s1_hwpt(HostIOMMUDeviceIOMMUFD *idev,
                               VTDS2Hwpt *s2_hwpt, VTDHwpt *hwpt,
-                              VTDPASIDEntry *pe, Error **errp)
+                              VTDPASIDEntry *pe, Error **errp, bool pasid)
 {
     struct iommu_hwpt_vtd_s1 vtd;
     uint32_t hwpt_id, s2_hwpt_id = s2_hwpt->hwpt_id;
@@ -2538,7 +2538,7 @@ static int vtd_create_s1_hwpt(HostIOMMUDeviceIOMMUFD *idev,
     vtd_init_s1_hwpt_data(&vtd, pe);
 
     if (!iommufd_backend_alloc_hwpt(idev->iommufd, idev->devid,
-                                    s2_hwpt_id, IOMMU_HWPT_ALLOC_PASID,
+                                    s2_hwpt_id, pasid ? IOMMU_HWPT_ALLOC_PASID : 0,
                                     IOMMU_HWPT_DATA_VTD_S1,
                                     sizeof(vtd), &vtd, &hwpt_id, errp)) {
         return -EINVAL;
@@ -2610,7 +2610,7 @@ static int vtd_device_attach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
     int ret;
 
     if (vtd_pe_pgtt_is_flt(pe)) {
-        ret = vtd_create_s1_hwpt(idev, s2_hwpt, hwpt, pe, errp);
+        ret = vtd_create_s1_hwpt(idev, s2_hwpt, hwpt, pe, errp, true);
         if (ret) {
             return ret;
         }
@@ -2639,6 +2639,9 @@ printf("%s - 2\n", __func__);
         Error *err;
 # if 1
 	uint32_t test_hwpt;
+	VTDHwpt test_nested_hwpt;
+
+	vtd_create_s1_hwpt(idev, s2_hwpt, &test_nested_hwpt, pe, errp, true);
 
     if (!iommufd_backend_alloc_hwpt(idev->iommufd, idev->devid,
                                      idev->ioas_id,
@@ -2648,22 +2651,25 @@ printf("%s - 2\n", __func__);
         printf("%s Failed to alloc test_hwpt\n", __func__);
     }
         printf("%s alloc test_hwpt: %u\n", __func__, test_hwpt);
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 10, test_nested_hwpt.hwpt_id, &err)) {
+		printf("%s, try to attach PASID %u test_nested_hwpt failed %m\n", __func__, 10);
+	}
 #endif
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 60, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 60, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 60);
         } else {
             if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 60, s2_hwpt->hwpt_id, &err)) {
-                printf("%s, try to attach PASID %u s2 hwpt_id failed\n", __func__, 60);
+                printf("%s, try to attach PASID %u s2 hwpt_id failed, expected!\n", __func__, 60);
             } else {
-                printf("%s, try to attach PASID %u hwpt succ\n", __func__, 60);
+                printf("%s, try to attach PASID %u s2 hwpt succ\n", __func__, 60);
             }
         }
 
         /* FIXME: for testing, attach the hwpt to pasid #300 as well */
         if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 300, s2_hwpt->hwpt_id, &err)) {
-            printf("%s, try to attach PASID %u to parent_id failed\n", __func__, 300);
+            printf("%s, try to attach PASID %u to parent_id failed, expected!!\n", __func__, 300);
         } else {
-            if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 300, hwpt->hwpt_id, &err)) {
+            if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 300, test_nested_hwpt.hwpt_id, &err)) {
                 printf("%s, try to attach PASID %u hwpt_id failed\n", __func__, 300);
             } else {
                 printf("%s, try to attach PASID %u hwpt succ\n", __func__, 300);
@@ -2671,40 +2677,40 @@ printf("%s - 2\n", __func__);
             pasid_300_attached = 1;
         }
 printf("%s 1 \n", __func__);
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1022, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1022, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1022);
         }
 
 printf("%s 2 \n", __func__);
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1025, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1025, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1025);
         }
 
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 63, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 63, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 63);
         }
 
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 64, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 64, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 64);
         }
 
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1325, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1325, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1325);
         }
 
         if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1086, s2_hwpt->hwpt_id, &err)) {
-            printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1086);
+            printf("%s, try to attach PASID %u s2 hwpt_id failed %m, expected!\n", __func__, 1086);
         }
 
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1094, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1094, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %u hwpt_id failed %m\n", __func__, 1094);
         }
 
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, INT_MAX, hwpt->hwpt_id, &err)) {
-            printf("%s, try to attach PASID %x hwpt_id failed %m\n", __func__, INT_MAX);
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, INT_MAX, test_nested_hwpt.hwpt_id, &err)) {
+            printf("%s, try to attach PASID %x hwpt_id failed %m, expected!\n", __func__, INT_MAX);
         }
 
-        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, (1 << 20) - 1, hwpt->hwpt_id, &err)) {
+        if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, (1 << 20) - 1, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %x hwpt_id failed %m\n", __func__, (1 << 20) - 1);
         }
     }
@@ -2791,7 +2797,8 @@ static int vtd_device_attach_container(VTDHostIOMMUDevice *vtd_hiod,
 printf("%s - 1\n", __func__);
     if (!iommufd_backend_alloc_hwpt(iommufd, idev->devid,
                                      container->ioas_id,
-                                     IOMMU_HWPT_ALLOC_NEST_PARENT | IOMMU_HWPT_ALLOC_PASID,
+                                     IOMMU_HWPT_ALLOC_NEST_PARENT,
+//                                     IOMMU_HWPT_ALLOC_NEST_PARENT | IOMMU_HWPT_ALLOC_PASID,
                                      IOMMU_HWPT_DATA_NONE,
                                      0, NULL, &s2_hwpt_id, errp)) {
         return -EINVAL;
