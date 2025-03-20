@@ -2674,7 +2674,6 @@ printf("%s - 2\n", __func__);
             } else {
                 printf("%s, try to attach PASID %u hwpt succ\n", __func__, 300);
             }
-            pasid_300_attached = 1;
         }
 printf("%s 1 \n", __func__);
         if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, 1022, test_nested_hwpt.hwpt_id, &err)) {
@@ -2713,6 +2712,7 @@ printf("%s 2 \n", __func__);
         if (!host_iommu_device_iommufd_pasid_attach_hwpt(idev, (1 << 20) - 1, test_nested_hwpt.hwpt_id, &err)) {
             printf("%s, try to attach PASID %x hwpt_id failed %m\n", __func__, (1 << 20) - 1);
         }
+        pasid_300_attached = 1;
     }
 #endif
     return 0;
@@ -2731,6 +2731,7 @@ static void vtd_device_detach_hwpt(VTDHostIOMMUDevice *vtd_hiod,
         if (!host_iommu_device_iommufd_pasid_detach_hwpt(idev, 300, &err)) {
             printf("%s, detach PASID 300 failed %m\n", __func__);
         }
+        host_iommu_device_iommufd_pasid_detach_hwpt(idev, 10, &err);
         host_iommu_device_iommufd_pasid_detach_hwpt(idev, 60, &err);
         host_iommu_device_iommufd_pasid_detach_hwpt(idev, 63, &err);
         host_iommu_device_iommufd_pasid_detach_hwpt(idev, 64, &err);
