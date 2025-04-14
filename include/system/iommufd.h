@@ -43,6 +43,11 @@ typedef struct IOMMUFDViommu {
     uint32_t viommu_id;
 } IOMMUFDViommu;
 
+typedef struct IOMMUFDVdevice {
+    IOMMUFDBackend *iommufd;
+    uint32_t vdevice_id;
+} IOMMUFDVdevice;
+
 bool iommufd_backend_connect(IOMMUFDBackend *be, Error **errp);
 void iommufd_backend_disconnect(IOMMUFDBackend *be);
 
@@ -77,6 +82,10 @@ struct IOMMUFDViommu *iommufd_backend_alloc_viommu(IOMMUFDBackend *be,
                                                    uint32_t flags,
                                                    uint32_t viommu_type,
                                                    uint32_t hwpt_id);
+struct IOMMUFDVdevice *iommufd_backend_alloc_vdevice(IOMMUFDBackend *be,
+                                                     uint32_t viommu_id,
+                                                     uint32_t dev_id,
+                                                     uint64_t virt_id);
 
 #define TYPE_HOST_IOMMU_DEVICE_IOMMUFD TYPE_HOST_IOMMU_DEVICE "-iommufd"
 OBJECT_DECLARE_TYPE(HostIOMMUDeviceIOMMUFD, HostIOMMUDeviceIOMMUFDClass,

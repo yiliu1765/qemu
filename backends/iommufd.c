@@ -325,6 +325,40 @@ struct IOMMUFDViommu *iommufd_backend_alloc_viommu(IOMMUFDBackend *be,
     return viommu;
 }
 
+struct IOMMUFDVdevice *iommufd_backend_alloc_vdevice(IOMMUFDBackend *be,
+                                                     uint32_t viommu_id,
+                                                     uint32_t dev_id,
+                                                     uint64_t virt_id)
+{
+    int ret, fd = be->fd;
+    struct IOMMUFDVdevice *vdevice = g_malloc(sizeof(*vdevice));
+    struct iommu_vdevice_alloc alloc_vdevice = {
+        .size = sizeof(alloc_vdevice),
+        .viommu_id = viommu_id,
+        .dev_id = dev_id,
+        .virt_id = virt_id,
+    };
+
+    if (!vdevice) {
+        error_report("failed to allocate vdevice object");
+        return NULL;
+    }
+
+    ret = ioctl(fd, IOMMU_VDEVICE_ALLOC, &alloc_vdevice);
+
+    trace_iommufd_backend_alloc_vdevice(fd, viommu_id, dev_id, virt_id,
+                                        alloc_vdevice.out_vdevice_id, ret);
+    if (ret) {
+        error_report("IOMMU_VIOMMU_ALLOC failed: %s", strerror(errno));
+        g_free(vdevice);
+        return NULL;
+    }
+
+    vdevice->vdevice_id = alloc_vdevice.out_vdevice_id;
+    vdevice->iommufd = be;
+    return vdevice;
+}
+
 bool iommufd_backend_get_device_info(IOMMUFDBackend *be, uint32_t devid,
                                      uint32_t *type, void *data, uint32_t len,
                                      uint64_t *caps, Error **errp)
