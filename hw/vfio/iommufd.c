@@ -305,7 +305,7 @@ static bool iommufd_cdev_autodomains_get(VFIODevice *vbasedev,
 {
     ERRP_GUARD();
     IOMMUFDBackend *iommufd = vbasedev->iommufd;
-    uint32_t type, flags = 0;
+    uint32_t type, flags = IOMMU_HWPT_ALLOC_NEST_PARENT;
     uint64_t hw_caps;
     VFIOIOASHwpt *hwpt;
     uint32_t hwpt_id;
@@ -349,7 +349,7 @@ static bool iommufd_cdev_autodomains_get(VFIODevice *vbasedev,
     }
 
     if (hw_caps & IOMMU_HW_CAP_DIRTY_TRACKING) {
-        flags = IOMMU_HWPT_ALLOC_DIRTY_TRACKING;
+        flags |= IOMMU_HWPT_ALLOC_DIRTY_TRACKING;
     }
 
     if (!iommufd_backend_alloc_hwpt(iommufd, vbasedev->devid,
