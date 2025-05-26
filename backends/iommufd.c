@@ -359,6 +359,37 @@ struct IOMMUFDVdevice *iommufd_backend_alloc_vdevice(IOMMUFDBackend *be,
     return vdevice;
 }
 
+int iommufd_backend_tsm_guest_request(IOMMUFDBackend *be,
+                                      uint32_t vdevice_id, uint32_t type,
+                                      void *type_info, uint32_t type_info_len,
+                                      void *req, uint32_t req_len,
+                                      void *resp, uint32_t resp_len,
+                                      uint32_t *actual_resp_len)
+{
+    struct iommu_vdevice_tsm_guest_request guest_req = {
+        .size = sizeof(guest_req),
+        .vdevice_id = vdevice_id,
+        .type = type,
+        .type_info_uptr = (uintptr_t)type_info,
+        .type_info_len = type_info_len,
+        .req_uptr = (uintptr_t)req,
+        .req_len = req_len,
+        .resp_uptr = (uintptr_t)resp,
+        .resp_len = resp_len,
+    };
+    int ret;
+
+    ret = ioctl(be->fd, IOMMU_VDEVICE_TSM_GUEST_REQUEST, &guest_req);
+    if (ret) {
+        error_report("IOMMU_VDEVICE_TSM_GUEST_REQUEST failed: %s", strerror(errno));
+        return ret;
+    }
+
+    *actual_resp_len = guest_req.resp_len;
+
+    return 0;
+}
+
 bool iommufd_backend_get_device_info(IOMMUFDBackend *be, uint32_t devid,
                                      uint32_t *type, void *data, uint32_t len,
                                      uint64_t *caps, Error **errp)

@@ -86,6 +86,12 @@ struct IOMMUFDVdevice *iommufd_backend_alloc_vdevice(IOMMUFDBackend *be,
                                                      uint32_t viommu_id,
                                                      uint32_t dev_id,
                                                      uint64_t virt_id);
+int iommufd_backend_tsm_guest_request(IOMMUFDBackend *be,
+                                      uint32_t vdevice_id, uint32_t type,
+                                      void *type_info, uint32_t type_info_len,
+                                      void *req, uint32_t req_len,
+                                      void *resp, uint32_t resp_len,
+                                      uint32_t *actual_resp_len);
 
 #define TYPE_HOST_IOMMU_DEVICE_IOMMUFD TYPE_HOST_IOMMU_DEVICE "-iommufd"
 OBJECT_DECLARE_TYPE(HostIOMMUDeviceIOMMUFD, HostIOMMUDeviceIOMMUFDClass,
