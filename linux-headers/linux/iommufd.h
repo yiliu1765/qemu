@@ -55,7 +55,7 @@ enum {
 	IOMMUFD_CMD_VIOMMU_ALLOC = 0x90,
 	IOMMUFD_CMD_VDEVICE_ALLOC = 0x91,
 	IOMMUFD_CMD_IOAS_CHANGE_PROCESS = 0x92,
-	IOMMUFD_CMD_VEVENTQ_ALLOC = 0x93,
+	IOMMUFD_CMD_VDEVICE_TSM_GUEST_REQUEST = 0x93,
 };
 
 /**
@@ -393,9 +393,6 @@ struct iommu_vfio_ioas {
  *                          Any domain attached to the non-PASID part of the
  *                          device must also be flagged, otherwise attaching a
  *                          PASID will blocked.
- *                          For the user that wants to attach PASID, ioas is
- *                          not recommended for both the non-PASID part
- *                          and PASID part of the device.
  *                          If IOMMU does not support PASID it will return
  *                          error (-EOPNOTSUPP).
  */
@@ -612,17 +609,9 @@ enum iommu_hw_info_type {
  *                                   IOMMU_HWPT_GET_DIRTY_BITMAP
  *                                   IOMMU_HWPT_SET_DIRTY_TRACKING
  *
- * @IOMMU_HW_CAP_PCI_PASID_EXEC: Execute Permission Supported, user ignores it
- *                               when the struct
- *                               iommu_hw_info::out_max_pasid_log2 is zero.
- * @IOMMU_HW_CAP_PCI_PASID_PRIV: Privileged Mode Supported, user ignores it
- *                               when the struct
- *                               iommu_hw_info::out_max_pasid_log2 is zero.
  */
 enum iommufd_hw_capabilities {
 	IOMMU_HW_CAP_DIRTY_TRACKING = 1 << 0,
-	IOMMU_HW_CAP_PCI_PASID_EXEC = 1 << 1,
-	IOMMU_HW_CAP_PCI_PASID_PRIV = 1 << 2,
 };
 
 /**
@@ -638,9 +627,6 @@ enum iommufd_hw_capabilities {
  *                 iommu_hw_info_type.
  * @out_capabilities: Output the generic iommu capability info type as defined
  *                    in the enum iommu_hw_capabilities.
- * @out_max_pasid_log2: Output the width of PASIDs. 0 means no PASID support.
- *                      PCI devices turn to out_capabilities to check if the
- *                      specific capabilities is supported or not.
  * @__reserved: Must be 0
  *
  * Query an iommu type specific hardware information data from an iommu behind
@@ -664,8 +650,7 @@ struct iommu_hw_info {
 	__u32 data_len;
 	__aligned_u64 data_uptr;
 	__u32 out_data_type;
-	__u8 out_max_pasid_log2;
-	__u8 __reserved[3];
+	__u32 __reserved;
 	__aligned_u64 out_capabilities;
 };
 #define IOMMU_GET_HW_INFO _IO(IOMMUFD_TYPE, IOMMUFD_CMD_GET_HW_INFO)
@@ -951,10 +936,12 @@ struct iommu_fault_alloc {
  * enum iommu_viommu_type - Virtual IOMMU Type
  * @IOMMU_VIOMMU_TYPE_DEFAULT: Reserved for future use
  * @IOMMU_VIOMMU_TYPE_ARM_SMMUV3: ARM SMMUv3 driver specific type
+ * @IOMMU_VIOMMU_TYPE_INTEL_TDXC: Intel TDX connect specific type
  */
 enum iommu_viommu_type {
 	IOMMU_VIOMMU_TYPE_DEFAULT = 0,
 	IOMMU_VIOMMU_TYPE_ARM_SMMUV3 = 1,
+	IOMMU_VIOMMU_TYPE_INTEL_TDXC = 2,
 };
 
 /**
@@ -1031,114 +1018,37 @@ struct iommu_ioas_change_process {
 	_IO(IOMMUFD_TYPE, IOMMUFD_CMD_IOAS_CHANGE_PROCESS)
 
 /**
- * enum iommu_veventq_flag - flag for struct iommufd_vevent_header
- * @IOMMU_VEVENTQ_FLAG_LOST_EVENTS: vEVENTQ has lost vEVENTs
+ * enum pci_tsm_guest_req_type - Specify the format of guest request blobs
+ * @PCI_TSM_GUEST_REQ_TDXC: Intel TDX Connect specific type
  */
-enum iommu_veventq_flag {
-	IOMMU_VEVENTQ_FLAG_LOST_EVENTS = (1U << 0),
+enum pci_tsm_guest_req_type {
+	PCI_TSM_GUEST_REQ_TDXC,
 };
 
 /**
- * struct iommufd_vevent_header - Virtual Event Header for a vEVENTQ Status
- * @flags: Combination of enum iommu_veventq_flag
- * @sequence: The sequence index of a vEVENT in the vEVENTQ, with a range of
- *            [0, INT_MAX] where the following index of INT_MAX is 0
- *
- * Each iommufd_vevent_header reports a sequence index of the following vEVENT:
- *
- * +----------------------+-------+----------------------+-------+---+-------+
- * | header0 {sequence=0} | data0 | header1 {sequence=1} | data1 |...| dataN |
- * +----------------------+-------+----------------------+-------+---+-------+
- *
- * And this sequence index is expected to be monotonic to the sequence index of
- * the previous vEVENT. If two adjacent sequence indexes has a delta larger than
- * 1, it means that delta - 1 number of vEVENTs has lost, e.g. two lost vEVENTs:
- *
- * +-----+----------------------+-------+----------------------+-------+-----+
- * | ... | header3 {sequence=3} | data3 | header6 {sequence=6} | data6 | ... |
- * +-----+----------------------+-------+----------------------+-------+-----+
- *
- * If a vEVENT lost at the tail of the vEVENTQ and there is no following vEVENT
- * providing the next sequence index, an IOMMU_VEVENTQ_FLAG_LOST_EVENTS header
- * would be added to the tail, and no data would follow this header:
- *
- * +--+----------------------+-------+-----------------------------------------+
- * |..| header3 {sequence=3} | data3 | header4 {flags=LOST_EVENTS, sequence=4} |
- * +--+----------------------+-------+-----------------------------------------+
+ * struct iommu_vdevice_tsm_guest_request - ioctl(IOMMU_VDEVICE_TSM_GUEST_REQUEST)
+ * @size: sizeof(struct iommu_vdevice_tsm_guest_request)
+ * @vdevice_id: vDevice ID the guest request is for
+ * @type: identify the format of the following blobs
+ * @type_info_len: the blob size for @type_info_uptr
+ * @req_len: the blob size for @req_uptr, filled by guest
+ * @resp_len: for input, the blob size for @resp_uptr, filled by guest
+ *	      for output, the size of actual response data, filled by host
+ * @type_info_uptr: extra input/output info, e.g. firmware error code
+ * @req_uptr: request data buffer filled by guest
+ * @resp_uptr: response data buffer filled by host
  */
-struct iommufd_vevent_header {
-	__u32 flags;
-	__u32 sequence;
-};
-
-/**
- * enum iommu_veventq_type - Virtual Event Queue Type
- * @IOMMU_VEVENTQ_TYPE_DEFAULT: Reserved for future use
- * @IOMMU_VEVENTQ_TYPE_ARM_SMMUV3: ARM SMMUv3 Virtual Event Queue
- */
-enum iommu_veventq_type {
-	IOMMU_VEVENTQ_TYPE_DEFAULT = 0,
-	IOMMU_VEVENTQ_TYPE_ARM_SMMUV3 = 1,
-};
-
-/**
- * struct iommu_vevent_arm_smmuv3 - ARM SMMUv3 Virtual Event
- *                                  (IOMMU_VEVENTQ_TYPE_ARM_SMMUV3)
- * @evt: 256-bit ARM SMMUv3 Event record, little-endian.
- *       Reported event records: (Refer to "7.3 Event records" in SMMUv3 HW Spec)
- *       - 0x04 C_BAD_STE
- *       - 0x06 F_STREAM_DISABLED
- *       - 0x08 C_BAD_SUBSTREAMID
- *       - 0x0a C_BAD_CD
- *       - 0x10 F_TRANSLATION
- *       - 0x11 F_ADDR_SIZE
- *       - 0x12 F_ACCESS
- *       - 0x13 F_PERMISSION
- *
- * StreamID field reports a virtual device ID. To receive a virtual event for a
- * device, a vDEVICE must be allocated via IOMMU_VDEVICE_ALLOC.
- */
-struct iommu_vevent_arm_smmuv3 {
-	__aligned_le64 evt[4];
-};
-
-/**
- * struct iommu_veventq_alloc - ioctl(IOMMU_VEVENTQ_ALLOC)
- * @size: sizeof(struct iommu_veventq_alloc)
- * @flags: Must be 0
- * @viommu_id: virtual IOMMU ID to associate the vEVENTQ with
- * @type: Type of the vEVENTQ. Must be defined in enum iommu_veventq_type
- * @veventq_depth: Maximum number of events in the vEVENTQ
- * @out_veventq_id: The ID of the new vEVENTQ
- * @out_veventq_fd: The fd of the new vEVENTQ. User space must close the
- *                  successfully returned fd after using it
- * @__reserved: Must be 0
- *
- * Explicitly allocate a virtual event queue interface for a vIOMMU. A vIOMMU
- * can have multiple FDs for different types, but is confined to one per @type.
- * User space should open the @out_veventq_fd to read vEVENTs out of a vEVENTQ,
- * if there are vEVENTs available. A vEVENTQ will lose events due to overflow,
- * if the number of the vEVENTs hits @veventq_depth.
- *
- * Each vEVENT in a vEVENTQ encloses a struct iommufd_vevent_header followed by
- * a type-specific data structure, in a normal case:
- *
- * +-+---------+-------+---------+-------+-----+---------+-------+-+
- * | | header0 | data0 | header1 | data1 | ... | headerN | dataN | |
- * +-+---------+-------+---------+-------+-----+---------+-------+-+
- *
- * unless a tailing IOMMU_VEVENTQ_FLAG_LOST_EVENTS header is logged (refer to
- * struct iommufd_vevent_header).
- */
-struct iommu_veventq_alloc {
+struct iommu_vdevice_tsm_guest_request {
 	__u32 size;
-	__u32 flags;
-	__u32 viommu_id;
+	__u32 vdevice_id;
 	__u32 type;
-	__u32 veventq_depth;
-	__u32 out_veventq_id;
-	__u32 out_veventq_fd;
-	__u32 __reserved;
+	__u32 type_info_len;
+	__u32 req_len;
+	__u32 resp_len;
+	__aligned_u64 type_info_uptr;
+	__aligned_u64 req_uptr;
+	__aligned_u64 resp_uptr;
 };
-#define IOMMU_VEVENTQ_ALLOC _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VEVENTQ_ALLOC)
+#define IOMMU_VDEVICE_TSM_GUEST_REQUEST _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VDEVICE_TSM_GUEST_REQUEST)
+
 #endif
