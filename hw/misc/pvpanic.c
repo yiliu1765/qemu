@@ -33,7 +33,16 @@ static void handle_event(int event)
     }
 
     if (event & PVPANIC_PANICKED) {
-        qemu_system_guest_panicked(NULL);
+        GuestPanicInformation *panic_info;
+
+        panic_info = g_new0(GuestPanicInformation, 1);
+        panic_info->type = GUEST_PANIC_INFORMATION_TYPE_TDX;
+        panic_info->u.tdx.error_code = (uint32_t) 0x123456;
+        panic_info->u.tdx.message = (char *)"I'm a fake panic for TDX";
+        panic_info->u.tdx.gpa = 0x654321;
+        panic_info->u.tdx.has_gpa = true;
+
+        qemu_system_guest_panicked(panic_info);
         return;
     }
 
