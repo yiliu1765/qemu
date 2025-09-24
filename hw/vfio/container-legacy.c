@@ -153,6 +153,10 @@ static int vfio_legacy_dma_unmap_one(const VFIOLegacyContainer *container,
         return -errno;
     }
 
+    if (flags == VFIO_DMA_UNMAP_FLAG_ALL) {
+        printf("unmap_all succeed\n");
+    }
+
     if (need_dirty_sync) {
         ret = vfio_container_query_dirty_bitmap(bcontainer, iova, size, 0,
                                     iotlb->translated_addr, &local_err);

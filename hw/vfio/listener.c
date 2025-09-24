@@ -728,6 +728,12 @@ static void vfio_listener_region_del(MemoryListener *listener,
             llsize = int128_zero();
         }
 
+        if (iova == 0xfef00000) {
+            iova = 0;
+            unmap_all = true;
+            llsize = int128_zero();
+        }
+
         /*
          * Fake an IOTLB entry for writable identity mapping which is needed
          * by dirty tracking when switch out of PT domain. In fact, in
