@@ -226,8 +226,14 @@ static int vfio_legacy_dma_map(const VFIOContainer *bcontainer, hwaddr iova,
         (errno == EBUSY &&
          vfio_legacy_dma_unmap(bcontainer, iova, size, NULL, false) == 0 &&
          ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
+        info_report("container fd=%d iova=0x%"PRIx64" size=0x%"PRIx64
+                    " addr=%p readonly=%d (%d)",
+                    container->fd, iova, size, vaddr, readonly, 0);
         return 0;
     }
+    info_report("container fd=%d iova=0x%"PRIx64" size=0x%"PRIx64
+                " addr=%p readonly=%d (%d)",
+                container->fd, iova, size, vaddr, readonly, 0);
 
     return -errno;
 }
@@ -626,6 +632,7 @@ static bool vfio_container_connect(VFIOGroup *group, AddressSpace *as,
 
     if (!cpr_is_incoming()) {
         QLIST_FOREACH(bcontainer, &space->containers, next) {
+            break;
             container = VFIO_IOMMU_LEGACY(bcontainer);
             if (!ioctl(group->fd, VFIO_GROUP_SET_CONTAINER, &container->fd)) {
                 return vfio_container_group_add(container, group, errp);

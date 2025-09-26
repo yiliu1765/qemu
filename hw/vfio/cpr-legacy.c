@@ -53,8 +53,14 @@ static int vfio_legacy_cpr_dma_map(const VFIOContainer *bcontainer,
     };
 
     if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map)) {
+        info_report("container fd=%d iova=0x%"PRIx64" size=0x%"PRIx64
+                    " addr=%p readonly=%d (%d)",
+                    container->fd, iova, size, vaddr, readonly, 0);
         return -errno;
     }
+    info_report("container fd=%d iova=0x%"PRIx64" size=0x%"PRIx64
+                " addr=%p readonly=%d (%d)",
+                container->fd, iova, size, vaddr, readonly, 0);
 
     return 0;
 }
@@ -87,11 +93,23 @@ static int vfio_container_pre_save(void *opaque)
 {
     VFIOLegacyContainer *container = opaque;
     Error *local_err = NULL;
+    static int cnt;
+
+    if (cnt) {
+        printf("vfio_container_pre_save, pretend unmap_all failed on container "
+               "fd %d\n", container->fd);
+        cnt = 0;
+        return -1;
+    }
+
+    cnt++;
 
     if (!vfio_dma_unmap_vaddr_all(container, &local_err)) {
         error_report_err(local_err);
         return -1;
     }
+    printf("vfio_container_pre_save, unmap_all pass on container fd %d\n",
+           container->fd);
     return 0;
 }
 

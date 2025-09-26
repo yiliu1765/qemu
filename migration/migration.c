@@ -1527,6 +1527,7 @@ int migration_call_notifiers(MigrationEventType type, Error **errp)
     NotifierWithReturn *notifier;
     GSList *elem, *next;
     int ret;
+    Error *err = NULL;
 
     trace_migration_call_notifiers(type);
 
@@ -1535,8 +1536,9 @@ int migration_call_notifiers(MigrationEventType type, Error **errp)
     for (elem = migration_state_notifiers[mode]; elem; elem = next) {
         next = elem->next;
         notifier = (NotifierWithReturn *)elem->data;
-        ret = notifier->notify(notifier, &e, errp);
+        ret = notifier->notify(notifier, &e, &err);
         if (ret) {
+            error_report_err(err);
             assert(type == MIG_EVENT_SETUP);
             return ret;
         }
