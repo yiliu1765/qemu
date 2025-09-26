@@ -3752,7 +3752,7 @@ int kvm_device_access(int fd, int group, uint64_t attr,
 
 bool kvm_has_sync_mmu(void)
 {
-    return kvm_state->sync_mmu;
+    return kvm_state && kvm_state->sync_mmu;
 }
 
 int kvm_has_vcpu_events(void)
