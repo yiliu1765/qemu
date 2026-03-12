@@ -97,6 +97,7 @@ static const Property pci_props[] = {
     DEFINE_PROP_BIT("x-pcie-ext-tag", PCIDevice, cap_present,
                     QEMU_PCIE_EXT_TAG_BITNR, true),
     { .name = "busnr", .info = &prop_pci_busnr },
+    DEFINE_PROP_BOOL("bypass-iommu", PCIDevice, bypass_iommu, false),
 };
 
 static const VMStateDescription vmstate_pcibus = {
@@ -2999,7 +3000,11 @@ AddressSpace *pci_device_iommu_address_space(PCIDevice *dev)
     PCIBus *bus;
     PCIBus *iommu_bus;
     int devfn;
-
+/*
+    if (dev->bypass_iommu) {
+        return &address_space_memory;
+    }
+*/
     pci_device_get_iommu_bus_devfn(dev, &iommu_bus, &bus, &devfn);
     if (iommu_bus) {
         return iommu_bus->iommu_ops->get_address_space(bus,

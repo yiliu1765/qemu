@@ -1742,6 +1742,10 @@ static bool vtd_switch_address_space(VTDAddressSpace *as)
         use_iommu = false;
     }
 
+    if (as->bus->devices[as->devfn]->bypass_iommu) {
+        use_iommu = false;
+    }
+
     trace_vtd_switch_address_space(pci_bus_num(as->bus),
                                    VTD_PCI_SLOT(as->devfn),
                                    VTD_PCI_FUNC(as->devfn),

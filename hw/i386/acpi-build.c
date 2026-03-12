@@ -1501,6 +1501,10 @@ insert_scope(PCIBus *bus, PCIDevice *dev, void *opaque)
                                      2 /* 1 path entry */;
     GArray *scope_blob = opaque;
 
+    if (dev->bypass_iommu) {
+        return;
+    }
+
     if (object_dynamic_cast(OBJECT(dev), TYPE_PCI_BRIDGE)) {
         /* Dmar Scope Type: 0x02 for PCI Bridge */
         build_append_int_noprefix(scope_blob, 0x02, 1);
