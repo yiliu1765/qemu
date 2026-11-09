@@ -12,7 +12,7 @@
 # on PyPI that allows the test suite to pass.
 
 # Dependencies for the TUI addon (Required for successful linting)
-urwid==2.1.2
+urwid==4.0.7
 urwid-readline==0.13
 Pygments==2.9.0
 
